@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta  charset="UTF-8"/>
+<meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 <title>Fluent Housekeeping</title>
 
@@ -403,6 +403,7 @@ tr:hover td{background:var(--surface2)}
 .rb-both{background:var(--violet-light);color:var(--violet);border:1px solid #C9BEF0}
 .rb-stay{background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
 .rb-departed{background:#E0F4F5;color:var(--teal);border:1px solid #9ADCE0}
+.rb-inhouse{background:#EEE8FF;color:var(--violet);border:1px solid #C9BEF0}
 .roster-unit-input{background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:4px 9px;color:var(--text);font-family:var(--font-m);font-size:11px;width:110px}
 .roster-unit-input:focus{border-color:var(--cyan);outline:none;background:#fff}
 
@@ -1011,6 +1012,7 @@ function snapshotDay(bldId){
       checkout:roster.checkout||false,
       checkin:roster.checkin||false,
       departed:roster.departed||false,
+      inhouse:roster.inhouse||false,
       guest:roster.guest||'',
       completedAt:r.completedAt||null,
     };
@@ -1550,7 +1552,7 @@ function generateExcel(days,filename,bldIdFilter='all'){
   const wb=XLSX.utils.book_new();
 
   // ── Sheet 1: Cleaning Report (every unit for every day) ──
-  const reportRows=[['Date','Building','Unit','Floor','Type','Cleaner','Status','Expected (min)','Actual (min)','Efficiency %','Over/Under','Checkout','Check-in','Departed','Guest','Completed At']];
+  const reportRows=[['Date','Building','Unit','Floor','Type','Cleaner','Status','Expected (min)','Actual (min)','Efficiency %','Over/Under','Checkout','Check-in','Departed','In House Cleaning','Guest','Completed At']];
   days.forEach(day=>{
     day.records.forEach(r=>{
       const overUnder=r.actualMins?r.actualMins-r.expectedMins:null;
@@ -1566,6 +1568,7 @@ function generateExcel(days,filename,bldIdFilter='all'){
         r.checkout?'YES':'NO',
         r.checkin?'YES':'NO',
         r.departed?'YES':'NO',
+        r.inhouse?'YES':'NO',
         r.guest||'',
         r.completedAt?new Date(r.completedAt).toLocaleString():'',
       ]);
@@ -1578,9 +1581,9 @@ function generateExcel(days,filename,bldIdFilter='all'){
   XLSX.utils.book_append_sheet(wb,wsReport,'Cleaning Report');
 
   // ── Sheet 2: Roster (check-in / check-out by date) ──
-  const rosterRows=[['Date','Building','Unit','Floor','Type','Guest','Checkout','Check-in','Departed','Turnover']];
+  const rosterRows=[['Date','Building','Unit','Floor','Type','Guest','Checkout','Check-in','Departed','In House Cleaning','Turnover']];
   days.forEach(day=>{
-    day.records.filter(r=>r.checkout||r.checkin||r.departed).forEach(r=>{
+    day.records.filter(r=>r.checkout||r.checkin||r.departed||r.inhouse).forEach(r=>{
       rosterRows.push([
         day.date, day.buildingName,
         r.unit, r.floor, r.type,
@@ -1588,13 +1591,14 @@ function generateExcel(days,filename,bldIdFilter='all'){
         r.checkout?'YES':'NO',
         r.checkin?'YES':'NO',
         r.departed?'YES':'NO',
+        r.inhouse?'YES':'NO',
         r.checkout&&r.checkin?'YES':'NO',
       ]);
     });
   });
-  if(rosterRows.length===1)rosterRows.push(['No roster data recorded','','','','','','','','','']);
+  if(rosterRows.length===1)rosterRows.push(['No roster data recorded','','','','','','','','','','']);
   const wsRoster=XLSX.utils.aoa_to_sheet(rosterRows);
-  wsRoster['!cols']=[{wch:12},{wch:22},{wch:8},{wch:6},{wch:18},{wch:20},{wch:10},{wch:10},{wch:10},{wch:10}];
+  wsRoster['!cols']=[{wch:12},{wch:22},{wch:8},{wch:6},{wch:18},{wch:20},{wch:10},{wch:10},{wch:10},{wch:18},{wch:10}];
   styleHeaderRow(wsRoster,rosterRows[0].length);
   XLSX.utils.book_append_sheet(wb,wsRoster,'Roster');
 
@@ -1979,7 +1983,7 @@ function renderRoster(bld,rooms){
   const sorted=[...rooms].sort((a,b)=>{const an=parseInt(a.number)||0,bn=parseInt(b.number)||0;return an!==bn?an-bn:a.number.localeCompare(b.number);});
 
   const rows=sorted.map(room=>{
-    const e=rosterDay[room.id]||{checkout:false,checkin:false,departed:false,guest:''};
+    const e=rosterDay[room.id]||{checkout:false,checkin:false,departed:false,inhouse:false,guest:''};
     const rt=RT[room.type];
     let badge='';
     if(e.checkout&&e.checkin) badge=`<span class="roster-badge rb-both">↕ BOTH</span>`;
@@ -1987,6 +1991,7 @@ function renderRoster(bld,rooms){
     else if(e.checkin)  badge=`<span class="roster-badge rb-checkin">↓ CHECK-IN</span>`;
     else badge=`<span class="roster-badge rb-stay">— STAY</span>`;
     if(e.departed) badge+=` <span class="roster-badge rb-departed">✓ DEPARTED</span>`;
+    if(e.inhouse) badge+=` <span class="roster-badge rb-inhouse">🏠 IN HOUSE</span>`;
 
     return `<tr>
       <td><b>Unit ${escH(room.number)}</b></td>
@@ -2012,6 +2017,12 @@ function renderRoster(bld,rooms){
         </label>
       </td>
       <td>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--muted)">
+          <input type="checkbox" onchange="setRoster('${bld.id}','${dateStr}','${room.id}','inhouse',this.checked);renderManagerMain()" ${e.inhouse?'checked':''}
+            style="accent-color:var(--violet);width:14px;height:14px"/> In House
+        </label>
+      </td>
+      <td>
         <input class="roster-unit-input" placeholder="Guest name (opt.)" value="${escH(e.guest||'')}"
           onchange="setRoster('${bld.id}','${dateStr}','${room.id}','guest',this.value)" 
           oninput="setRoster('${bld.id}','${dateStr}','${room.id}','guest',this.value)"/>
@@ -2023,6 +2034,7 @@ function renderRoster(bld,rooms){
   const checkins=Object.values(rosterDay).filter(e=>e.checkin).length;
   const both=Object.values(rosterDay).filter(e=>e.checkout&&e.checkin).length;
   const departed=Object.values(rosterDay).filter(e=>e.departed).length;
+  const inhouse=Object.values(rosterDay).filter(e=>e.inhouse).length;
 
   return `
   <div class="topbar"><h1>${escH(bld.name)} — Daily Roster</h1></div>
@@ -2040,6 +2052,7 @@ function renderRoster(bld,rooms){
       <span>📥 <b style="color:var(--green)">${checkins}</b> check-ins</span>
       <span>↕ <b style="color:var(--violet)">${both}</b> same-day turnovers</span>
       <span>✓ <b style="color:var(--teal)">${departed}</b> departed${checkouts?` of ${checkouts}`:''}</span>
+      <span>🏠 <b style="color:var(--violet)">${inhouse}</b> in house cleaning</span>
     </div>
   </div>
 
@@ -2053,7 +2066,7 @@ function renderRoster(bld,rooms){
     </div>
     <div class="roster-table-wrap">
       <table class="roster-table">
-        <thead><tr><th>UNIT</th><th>TYPE</th><th>FLOOR</th><th>STATUS</th><th>CHECKOUT</th><th>CHECK-IN</th><th>DEPARTED</th><th>GUEST</th></tr></thead>
+        <thead><tr><th>UNIT</th><th>TYPE</th><th>FLOOR</th><th>STATUS</th><th>CHECKOUT</th><th>CHECK-IN</th><th>DEPARTED</th><th>IN HOUSE</th><th>GUEST</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -2673,10 +2686,11 @@ function updateCaTimers(){
 function caRosterBadge(bldId,roomId){
   const re=getRosterEntry(bldId,todayStr(),roomId);
   const dep=re.departed?`<span style="font-size:9px;background:#E0F4F5;color:var(--teal);border:1px solid var(--teal);border-radius:3px;padding:1px 6px;margin-left:4px">✓ DEPARTED</span>`:'';
-  if(re.checkout&&re.checkin)return`<span style="font-size:9px;background:#1a001a;color:var(--violet);border:1px solid var(--violet);border-radius:3px;padding:1px 6px;margin-left:4px">↕ TURNOVER</span>`+dep;
-  if(re.checkout)return`<span style="font-size:9px;background:#1a1000;color:var(--amber);border:1px solid var(--amber);border-radius:3px;padding:1px 6px;margin-left:4px">↑ CHECKOUT</span>`+dep;
-  if(re.checkin) return`<span style="font-size:9px;background:#001a0a;color:var(--green);border:1px solid var(--green);border-radius:3px;padding:1px 6px;margin-left:4px">↓ CHECK-IN</span>`+dep;
-  return dep;
+  const inh=re.inhouse?`<span style="font-size:9px;background:#EEE8FF;color:var(--violet);border:1px solid var(--violet);border-radius:3px;padding:1px 6px;margin-left:4px">🏠 IN HOUSE</span>`:'';
+  if(re.checkout&&re.checkin)return`<span style="font-size:9px;background:#1a001a;color:var(--violet);border:1px solid var(--violet);border-radius:3px;padding:1px 6px;margin-left:4px">↕ TURNOVER</span>`+dep+inh;
+  if(re.checkout)return`<span style="font-size:9px;background:#1a1000;color:var(--amber);border:1px solid var(--amber);border-radius:3px;padding:1px 6px;margin-left:4px">↑ CHECKOUT</span>`+dep+inh;
+  if(re.checkin) return`<span style="font-size:9px;background:#001a0a;color:var(--green);border:1px solid var(--green);border-radius:3px;padding:1px 6px;margin-left:4px">↓ CHECK-IN</span>`+dep+inh;
+  return dep+inh;
 }
 
 function renderCaContent(){
