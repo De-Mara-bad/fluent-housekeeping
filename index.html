@@ -732,12 +732,12 @@ const LOGO_TRANS='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAyAAAAGGCAYAAACD
 //  CONSTANTS
 // ═══════════════════════════════════════════
 const RT = {
-  COMPACT:   {label:'Compact Studio',short:'Compact', icon:'▪',mins:35,color:'#0072CF',bg:'#E8F3FC'},
-  STUDIO:    {label:'Studio',        short:'Studio',  icon:'▫',mins:40,color:'#00A86B',bg:'#E6F7F1'},
-  ONE_BED:   {label:'1 Bedroom',     short:'1 Bed',   icon:'◈',mins:60,color:'#E8920A',bg:'#FEF4E4'},
-  TWO_BED:   {label:'2 Bedroom',     short:'2 Bed',   icon:'◉',mins:90,color:'#C4006C',bg:'#FCE8F3'},
-  THREE_BED: {label:'3 Bedroom',     short:'3 Bed',   icon:'◆',mins:120,color:'#6A4FC8',bg:'#F0ECFB'},
-  URBAN:     {label:'Urban Pod',     short:'Pod',     icon:'⬡',mins:30,color:'#0096A0',bg:'#E5F6F7'},
+  COMPACT:   {label:'Compact Studio',short:'Compact', icon:'▪',mins:45, depMins:90, color:'#0072CF',bg:'#E8F3FC'},
+  STUDIO:    {label:'Studio',        short:'Studio',  icon:'▫',mins:60, depMins:135,color:'#00A86B',bg:'#E6F7F1'},
+  ONE_BED:   {label:'1 Bedroom',     short:'1 Bed',   icon:'◈',mins:75, depMins:150,color:'#E8920A',bg:'#FEF4E4'},
+  TWO_BED:   {label:'2 Bedroom',     short:'2 Bed',   icon:'◉',mins:120,depMins:210,color:'#C4006C',bg:'#FCE8F3'},
+  THREE_BED: {label:'3 Bedroom',     short:'3 Bed',   icon:'◆',mins:150,depMins:270,color:'#6A4FC8',bg:'#F0ECFB'},
+  URBAN:     {label:'Urban Pod',     short:'Pod',     icon:'⬡',mins:45, depMins:90, color:'#0096A0',bg:'#E5F6F7'},
 };
 const CHECKOUT_MIN=600, CHECKIN_MIN=900, WINDOW=300;
 
@@ -1000,10 +1000,12 @@ function snapshotDay(bldId){
   const records=rooms.map(r=>{
     const rt=RT[r.type];
     const roster=getRosterEntry(bldId,dateStr,r.id);
-    const effPct=r.duration?Math.round((r.duration/rt.mins)*100):null;
+    const targetMins=roster.departed?rt.depMins:rt.mins;
+    const effPct=r.duration?Math.round((r.duration/targetMins)*100):null;
     return {
       unit:r.number, floor:r.floor, type:rt.label,
-      expectedMins:rt.mins,
+      expectedMins:targetMins,
+      depClean:roster.departed||false,
       actualMins:r.duration||null,
       efficiencyPct:effPct,
       status:r.status,
@@ -1552,9 +1554,11 @@ function generateExcel(days,filename,bldIdFilter='all'){
   const wb=XLSX.utils.book_new();
 
   // ── Sheet 1: Cleaning Report (every unit for every day) ──
-  const reportRows=[['Date','Building','Unit','Floor','Type','Cleaner','Status','Expected (min)','Actual (min)','Efficiency %','Over/Under','Checkout','Check-in','Departed','In House Cleaning','Guest','Completed At']];
+  const reportRows=[['Date','Building','Unit','Floor','Type','Cleaner','Status','Expected (min)','Departure Clean Target (min)','Actual (min)','Efficiency %','Over/Under','Checkout','Check-in','Departed','In House Cleaning','Guest','Completed At']];
   days.forEach(day=>{
     day.records.forEach(r=>{
+      const rtEx=RT[Object.keys(RT).find(k=>RT[k].label===r.type)||'COMPACT'];
+      const depTarget=rtEx?rtEx.depMins:'';
       const overUnder=r.actualMins?r.actualMins-r.expectedMins:null;
       reportRows.push([
         day.date,
@@ -1562,6 +1566,7 @@ function generateExcel(days,filename,bldIdFilter='all'){
         r.unit, r.floor, r.type,
         r.cleaner, r.status,
         r.expectedMins,
+        r.departed?depTarget:'',
         r.actualMins||'',
         r.efficiencyPct||'',
         overUnder!=null?(overUnder>0?'+'+overUnder:overUnder)+'min':'',
@@ -1576,7 +1581,7 @@ function generateExcel(days,filename,bldIdFilter='all'){
   });
   const wsReport=XLSX.utils.aoa_to_sheet(reportRows);
   // Column widths
-  wsReport['!cols']=[{wch:12},{wch:22},{wch:8},{wch:6},{wch:18},{wch:18},{wch:12},{wch:14},{wch:12},{wch:13},{wch:12},{wch:10},{wch:10},{wch:10},{wch:20},{wch:20}];
+  wsReport['!cols']=[{wch:12},{wch:22},{wch:8},{wch:6},{wch:18},{wch:18},{wch:12},{wch:14},{wch:22},{wch:12},{wch:13},{wch:12},{wch:10},{wch:10},{wch:10},{wch:18},{wch:20},{wch:20}];
   styleHeaderRow(wsReport,reportRows[0].length);
   XLSX.utils.book_append_sheet(wb,wsReport,'Cleaning Report');
 
@@ -2816,17 +2821,19 @@ function renderCaContent(){
       listHtml+=`<div class="ca-section-label">🏢 ${escH(grp.name)}</div><div class="ca-room-list">`;
       grp.rooms.forEach(room=>{
         const rt=RT[room.type];
+        const re=getRosterEntry(room.bldId,todayStr(),room.id);
+        const targetMins=re.departed?rt.depMins:rt.mins;
         const isActive=room.status==='IN_PROGRESS';
         const liveMin=isActive&&room.startedAt?Math.floor((Date.now()-room.startedAt)/60000):null;
-        const over=liveMin!=null&&liveMin>rt.mins;
-        const barPct=liveMin!=null?Math.min(100,Math.round((liveMin/rt.mins)*100)):0;
+        const over=liveMin!=null&&liveMin>targetMins;
+        const barPct=liveMin!=null?Math.min(100,Math.round((liveMin/targetMins)*100)):0;
         const badge=caRosterBadge(room.bldId,room.id);
-        const re=getRosterEntry(room.bldId,todayStr(),room.id);
         const guestTag=re.guest?`<div style="font-size:10px;color:var(--muted);margin-bottom:5px">👤 ${escH(re.guest)}</div>`:'';
+        const depTag=re.departed?`<span style="font-size:9px;background:#E0F4F5;color:var(--teal);border:1px solid var(--teal);border-radius:3px;padding:1px 6px;margin-left:4px">DEP CLEAN ${targetMins}min</span>`:'';
         const timerHtml=isActive?`
           <div class="ca-timer${over?' over':''}" id="catimer-${room.id}">${liveMin||0}min</div>
           <div class="mini-bar"><div class="mini-bar-fill" style="background:${over?'var(--red)':'var(--green)'};width:${barPct}%"></div></div>
-          <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:8px">Expected: ${rt.mins}min</div>`:'';
+          <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:8px">Expected: ${targetMins}min${re.departed?' (departure clean)':''}</div>`:'';
 
         // ── ACTION AREA ──
         let actionHtml='';
@@ -2870,8 +2877,8 @@ function renderCaContent(){
             </div>
             <span class="status-chip chip-${room.status.toLowerCase()}">${room.status.replace('_',' ')}</span>
           </div>
-          <div style="font-size:10px;color:var(--muted);margin:4px 0 6px">${fmtFloor(room.floor)} · ${rt.mins}min expected</div>
-          ${guestTag}${timerHtml}
+          <div style="font-size:10px;color:var(--muted);margin:4px 0 6px">${fmtFloor(room.floor)} · ${targetMins}min expected${re.departed?' (departure clean)':''}</div>
+          ${depTag}${guestTag}${timerHtml}
           <div class="ca-room-actions">${actionHtml}</div>
         </div>`;
       });
@@ -2888,7 +2895,10 @@ function renderCaContent(){
       return;
     }
     const doneList=done.map(room=>{
-      const rt=RT[room.type],dur=room.duration||'?',exp=rt.mins;
+      const rt=RT[room.type];
+      const reD=getRosterEntry(room.bldId,todayStr(),room.id);
+      const exp=reD.departed?rt.depMins:rt.mins;
+      const dur=room.duration||'?';
       const pct=room.duration?Math.round((room.duration/exp)*100):null;
       const effC=!pct?'var(--muted)':pct<=100?'var(--green)':pct<=125?'var(--amber)':'var(--red)';
       const effLabel=!pct?'':pct<=100?' ✓':pct<=125?' ⚠':' ✕';
