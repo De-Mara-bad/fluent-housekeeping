@@ -1998,7 +1998,9 @@ function renderRoster(bld,rooms){
     if(e.departed) badge+=` <span class="roster-badge rb-departed">✓ DEPARTED</span>`;
     if(e.inhouse) badge+=` <span class="roster-badge rb-inhouse">🏠 IN HOUSE</span>`;
 
-    return `<tr>
+    const rowBg=e.departed?'background:#D6F4F6;':e.inhouse?'background:#EEE8FF;':'';
+
+    return `<tr style="${rowBg}">
       <td><b>Unit ${escH(room.number)}</b></td>
       <td><span style="color:${rt.color};font-weight:600">${rt.icon} ${rt.short}</span></td>
       <td>Fl. ${room.floor}</td>
@@ -2867,7 +2869,8 @@ function renderCaContent(){
             </div>`;
         }
 
-        listHtml+=`<div class="ca-room ${isActive?'ca-active':''}" id="caroom-${room.id}">
+        const cardBg=re.departed?'background:#D6F4F6;':re.inhouse?'background:#EEE8FF;':'';
+        listHtml+=`<div class="ca-room ${isActive?'ca-active':''}" id="caroom-${room.id}" style="${cardBg}">
           <div class="room-accent" style="background:${rt.color}"></div>
           <div class="ca-room-top">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
