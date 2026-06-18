@@ -412,10 +412,9 @@ tr:hover td{background:var(--surface2)}
 .sched-pool{background:var(--surface);border-radius:var(--r);padding:16px;box-shadow:var(--shadow-sm);border:1px solid var(--border)}
 .sched-pool-title{font-size:9px;color:var(--muted);letter-spacing:.12em;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-weight:700;text-transform:uppercase}
 .sched-pool-list{display:flex;flex-direction:column;gap:6px;min-height:60px}
-.sched-unit-pill{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:8px 10px;cursor:grab;transition:.15s;user-select:none}
+.sched-unit-pill{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:8px 10px;cursor:pointer;transition:.15s;user-select:none}
 .sched-unit-pill:hover{border-color:var(--cyan);background:var(--cyan-light)}
-.sched-unit-pill.dragging{opacity:.4;cursor:grabbing}
-.sched-unit-pill.drag-over{border-color:var(--cyan);background:var(--cyan-light)}
+.sched-unit-pill.selected{border-color:var(--cyan);background:var(--cyan-light);box-shadow:0 0 0 2px var(--cyan);font-weight:700}
 .sched-pill-num{font-weight:700;font-size:13px;color:var(--text)}
 .sched-pill-type{font-size:9px;font-weight:700}
 .sched-pill-mins{margin-left:auto;font-size:10px;color:var(--muted)}
@@ -425,8 +424,8 @@ tr:hover td{background:var(--surface2)}
 .sched-cleaner-name{font-size:13px;font-weight:700;color:var(--text)}
 .sched-lane-stats{font-size:10px;color:var(--muted)}
 .sched-drop-zone{min-height:44px;border:2px dashed var(--border);border-radius:var(--rs);padding:6px;display:flex;flex-direction:column;gap:5px;transition:.15s;background:var(--surface2)}
-.sched-drop-zone.drag-over-zone{border-color:var(--cyan);background:var(--cyan-light)}
-.sched-drop-zone.empty::after{content:'Drop units here';font-size:10px;color:var(--muted);padding:10px;text-align:center;display:block}
+.sched-drop-zone.tap-ready{border-color:var(--cyan);background:var(--cyan-light);cursor:pointer}
+.sched-drop-zone.empty::after{content:'Tap to assign selected unit';font-size:10px;color:var(--muted);padding:10px;text-align:center;display:block}
 .sched-assigned-pill{display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rs);padding:7px 10px;cursor:grab;user-select:none;transition:.15s;box-shadow:var(--shadow-sm)}
 .sched-assigned-pill:hover{border-color:var(--red);background:var(--red-light)}
 .sched-assigned-pill .remove-btn{margin-left:auto;color:var(--muted);font-size:14px;cursor:pointer;line-height:1;flex-shrink:0}
@@ -2102,7 +2101,7 @@ function clearRosterDay(bldId,dateStr){
 // ═══════════════════════════════════════════
 //  DRAG-AND-DROP SCHEDULER
 // ═══════════════════════════════════════════
-let dragState={roomId:null,fromCleaner:null,fromPool:false};
+// ── TAP-TO-ASSIGN SCHEDULER ──
 
 function renderScheduler(bld,rooms){
   const dateStr=schedDate;
@@ -2118,7 +2117,7 @@ function renderScheduler(bld,rooms){
     // check roster status
     const re=getRosterEntry(bld.id,dateStr,r.id);
     const badge=(re.checkout?`<span style="font-size:8px;color:var(--amber);margin-left:2px">CO</span>`:re.checkin?`<span style="font-size:8px;color:var(--green);margin-left:2px">CI</span>`:``)+(re.departed?`<span style="font-size:8px;color:var(--teal);margin-left:2px">✓</span>`:``);
-    return `<div class="sched-unit-pill" draggable="true" data-room="${r.id}" data-from="pool">
+    return `<div class="sched-unit-pill" data-room="${r.id}" data-from="pool" onclick="schedTapPill(this,'${r.id}','pool')">
       <span style="color:${rt.color};font-size:14px">${rt.icon}</span>
       <span class="sched-pill-num">${escH(r.number)}</span>
       <span class="sched-pill-type" style="color:${rt.color}">${rt.short}${badge}</span>
@@ -2150,13 +2149,13 @@ function renderScheduler(bld,rooms){
       for(let i=0;i<idx;i++){const pr=rooms.find(x=>x.id===assigned[i]);if(pr)startMin+=RT[pr.type].mins;}
       const re=getRosterEntry(bld.id,dateStr,r.id);
       const badge=(re.checkout?`<span style="font-size:8px;color:var(--amber)">CO</span>`:re.checkin?`<span style="font-size:8px;color:var(--green)">CI</span>`:``)+(re.departed?`<span style="font-size:8px;color:var(--teal)">✓</span>`:``);
-      return `<div class="sched-assigned-pill" draggable="true" data-room="${rid}" data-from="${c.id}">
+      return `<div class="sched-assigned-pill" data-room="${rid}" data-from="${c.id}" onclick="schedTapPill(this,'${rid}','${c.id}')">
         <span style="color:${rt.color};font-size:13px">${rt.icon}</span>
         <span style="font-weight:700">${escH(r.number)}</span>
         <span style="font-size:9px;color:${rt.color}">${rt.short}</span>
         ${badge}
         <span class="sched-time-tag">${timeStr(startMin)}</span>
-        <span class="remove-btn" onclick="removeFromSchedule('${bld.id}','${dateStr}','${c.id}','${rid}')">✕</span>
+        <span class="remove-btn" onclick="event.stopPropagation();schedReturnToPool('${rid}','${c.id}')">✕</span>
       </div>`;
     }).join('');
 
@@ -2171,7 +2170,7 @@ function renderScheduler(bld,rooms){
         <button class="btn btn-ghost btn-sm" onclick="clearCleanerSchedule('${bld.id}','${dateStr}','${c.id}')">Clear</button>
       </div>
       <div class="sched-gantt-mini" title="${totalMins}min total">${ganttSegs}<div style="flex:1;background:var(--surface2)"></div></div>
-      <div class="sched-drop-zone${!assigned.length?' empty':''}" data-zone="${c.id}" style="margin-top:8px">${pills}</div>
+      <div class="sched-drop-zone${!assigned.length?' empty':''}" data-zone="${c.id}" style="margin-top:8px" onclick="schedTapZone('${c.id}')">${pills}</div>
     </div>`;
   }).join('');
 
@@ -2187,8 +2186,10 @@ function renderScheduler(bld,rooms){
     <button class="btn btn-ghost btn-sm" onclick="schedFromRoster('${bld.id}','${dateStr}')">📋 From Roster</button>
   </div>
 
+  <div id="sched-tap-banner" style="display:none;align-items:center;justify-content:space-between;background:var(--cyan-light);border:1px solid var(--cyan);border-radius:var(--rs);padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--text);font-weight:600;position:sticky;top:0;z-index:10"></div>
+
   <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
-    💡 Drag units from the <b style="color:var(--text)">Unit Pool</b> onto a cleaner's lane. Drag between lanes to reassign. Click ✕ to return to pool. <b style="color:var(--amber)">CO</b>=checkout <b style="color:var(--green)">CI</b>=check-in today.
+    💡 <b style="color:var(--text)">Tap a unit</b> to select it, then <b style="color:var(--text)">tap a cleaner</b> to assign. Tap ✕ to return to pool. <b style="color:var(--amber)">CO</b>=checkout <b style="color:var(--green)">CI</b>=check-in today.
   </div>
 
   <div class="sched-builder fi">
@@ -2257,88 +2258,95 @@ function schedFromRoster(bldId,dateStr){
 }
 
 // ── DRAG AND DROP ──
+// ── TAP-TO-ASSIGN SCHEDULER ──
+let tapSelected={roomId:null,fromCleaner:null};
+
 function initDrag(){
-  // Drag from pool and lanes
-  document.querySelectorAll('[draggable=true][data-room]').forEach(el=>{
-    el.addEventListener('dragstart',onDragStart);
-    el.addEventListener('dragend',onDragEnd);
-  });
-  // Drop zones: cleaner lanes + pool
-  document.querySelectorAll('[data-zone]').forEach(zone=>{
-    zone.addEventListener('dragover',onDragOver);
-    zone.addEventListener('dragleave',onDragLeave);
-    zone.addEventListener('drop',onDrop);
-  });
-  // Reorder within lane: drop onto existing pill
-  document.querySelectorAll('.sched-assigned-pill').forEach(pill=>{
-    pill.addEventListener('dragover',e=>{e.preventDefault();pill.classList.add('drag-over');});
-    pill.addEventListener('dragleave',()=>pill.classList.remove('drag-over'));
-    pill.addEventListener('drop',e=>{
-      e.preventDefault();e.stopPropagation();
-      pill.classList.remove('drag-over');
-      const toRoomId=pill.dataset.room;
-      const toCleaner=pill.closest('[data-zone]')?.dataset?.zone;
-      if(toCleaner&&toCleaner!=='pool') handleDropOnPill(toCleaner,toRoomId);
-    });
-  });
+  // No-op — tap system uses inline onclick handlers
+  updateTapUI();
 }
 
-function onDragStart(e){
-  dragState.roomId=e.currentTarget.dataset.room;
-  dragState.fromCleaner=e.currentTarget.dataset.from==='pool'?null:e.currentTarget.dataset.from;
-  dragState.fromPool=e.currentTarget.dataset.from==='pool';
-  e.currentTarget.classList.add('dragging');
-  e.dataTransfer.effectAllowed='move';
-}
-function onDragEnd(e){e.currentTarget.classList.remove('dragging');}
-function onDragOver(e){e.preventDefault();e.currentTarget.classList.add('drag-over-zone');e.dataTransfer.dropEffect='move';}
-function onDragLeave(e){e.currentTarget.classList.remove('drag-over-zone');}
-function onDrop(e){
-  e.preventDefault();
-  const zone=e.currentTarget;zone.classList.remove('drag-over-zone');
-  const toZone=zone.dataset.zone;
-  const{roomId,fromCleaner,fromPool}=dragState;
-  if(!roomId)return;
-  const bldId=state.activeBuilding;
-  const dateStr=schedDate;
-
-  if(toZone==='pool'){
-    // Return to pool
-    if(fromCleaner) setSchedule(bldId,dateStr,fromCleaner,getSchedule(bldId,dateStr,fromCleaner).filter(id=>id!==roomId));
-  } else {
-    // Drop onto a cleaner lane
-    if(fromCleaner&&fromCleaner!==toZone){
-      // Remove from source
-      setSchedule(bldId,dateStr,fromCleaner,getSchedule(bldId,dateStr,fromCleaner).filter(id=>id!==roomId));
-    } else if(fromPool){
-      // nothing to remove from pool
-    } else if(fromCleaner===toZone){
-      // same lane reorder handled by pill drop
-      return;
-    }
-    // Add to target if not already there
-    const cur=getSchedule(bldId,dateStr,toZone);
-    if(!cur.includes(roomId)) setSchedule(bldId,dateStr,toZone,[...cur,roomId]);
-  }
-  dragState={roomId:null,fromCleaner:null,fromPool:false};
-  renderManagerMain();
-}
-
-function handleDropOnPill(cleanerId,targetRoomId){
-  const{roomId,fromCleaner}=dragState;
-  if(!roomId||roomId===targetRoomId)return;
+function schedTapPill(el,roomId,from){
   const bldId=state.activeBuilding,dateStr=schedDate;
-  // Remove from source if different cleaner
-  if(fromCleaner&&fromCleaner!==cleanerId)
+  // If a room is already selected and this is a cleaner zone tap via pill — assign
+  if(tapSelected.roomId&&tapSelected.roomId!==roomId&&from!=='pool'){
+    // Tapping an assigned pill in a lane while another room is selected = assign selected to this cleaner
+    schedAssignTo(from);
+    return;
+  }
+  // Deselect if tapping the same pill
+  if(tapSelected.roomId===roomId){
+    tapSelected={roomId:null,fromCleaner:null};
+    updateTapUI();
+    return;
+  }
+  // Select this pill
+  tapSelected={roomId,fromCleaner:from==='pool'?null:from};
+  updateTapUI();
+}
+
+function schedTapZone(cleanerId){
+  if(!tapSelected.roomId) return;
+  schedAssignTo(cleanerId);
+}
+
+function schedAssignTo(cleanerId){
+  const{roomId,fromCleaner}=tapSelected;
+  if(!roomId)return;
+  const bldId=state.activeBuilding,dateStr=schedDate;
+  // Remove from source cleaner if applicable
+  if(fromCleaner&&fromCleaner!==cleanerId){
     setSchedule(bldId,dateStr,fromCleaner,getSchedule(bldId,dateStr,fromCleaner).filter(id=>id!==roomId));
-  // Insert before target in this lane
-  let cur=getSchedule(bldId,dateStr,cleanerId).filter(id=>id!==roomId);
-  const idx=cur.indexOf(targetRoomId);
-  if(idx>=0)cur.splice(idx,0,roomId);else cur.push(roomId);
-  setSchedule(bldId,dateStr,cleanerId,cur);
-  dragState={roomId:null,fromCleaner:null,fromPool:false};
+  }
+  // Add to target cleaner
+  const cur=getSchedule(bldId,dateStr,cleanerId);
+  if(!cur.includes(roomId)) setSchedule(bldId,dateStr,cleanerId,[...cur,roomId]);
+  tapSelected={roomId:null,fromCleaner:null};
+  saveState();
   renderManagerMain();
 }
+
+function schedReturnToPool(roomId,fromCleaner){
+  if(!fromCleaner)return;
+  const bldId=state.activeBuilding,dateStr=schedDate;
+  setSchedule(bldId,dateStr,fromCleaner,getSchedule(bldId,dateStr,fromCleaner).filter(id=>id!==roomId));
+  tapSelected={roomId:null,fromCleaner:null};
+  saveState();
+  renderManagerMain();
+}
+
+function updateTapUI(){
+  // Highlight selected pill
+  document.querySelectorAll('.sched-unit-pill,.sched-assigned-pill').forEach(el=>{
+    el.classList.toggle('selected',el.dataset.room===tapSelected.roomId);
+  });
+  // Highlight all cleaner zones as tap targets when a room is selected
+  document.querySelectorAll('.sched-drop-zone').forEach(zone=>{
+    zone.classList.toggle('tap-ready',!!tapSelected.roomId);
+  });
+  // Show/hide the selection banner
+  const banner=document.getElementById('sched-tap-banner');
+  if(banner){
+    if(tapSelected.roomId){
+      const bldId=state.activeBuilding;
+      const rooms=getBuildingRooms(bldId);
+      const room=rooms.find(r=>r.id===tapSelected.roomId);
+      const rt=room?RT[room.type]:null;
+      banner.style.display='flex';
+      banner.innerHTML=`<span>✓ Unit <b>${room?room.number:'?'}</b> selected${rt?' — '+rt.short:''} — tap a cleaner to assign</span>
+        <button onclick="tapSelected={roomId:null,fromCleaner:null};updateTapUI()" style="background:none;border:none;color:var(--cyan);font-size:18px;cursor:pointer;padding:0 4px">✕</button>`;
+    } else {
+      banner.style.display='none';
+    }
+  }
+}
+
+function onDragStart(){}
+function onDragEnd(){}
+function onDragOver(){}
+function onDragLeave(){}
+function onDrop(){}
+function handleDropOnPill(){}
 
 // ═══════════════════════════════════════════
 //  ROOMS VIEW
