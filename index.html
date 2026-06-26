@@ -612,6 +612,7 @@ tr:hover td{background:var(--surface2)}
     </div>
     <div id="login-form"></div>
     <div class="err" id="login-err"></div>
+    <div id="login-hint" style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px"></div>
   </div>
 </div>
 
@@ -799,6 +800,11 @@ function defaultState(){
       {id:'c5',name:'Lindiwe V.',pin:'5555'},{id:'c6',name:'Bongani H.',pin:'6666'},
     ],
     managerPass:'1234',
+    managers:[
+      {id:'m1',name:'De-Mara',pin:'1234'},
+      {id:'m2',name:'Anita',pin:''},
+      {id:'m3',name:'Ludwig',pin:''},
+    ],
     roster:{},
     schedules:{},
     history:{},
@@ -829,6 +835,14 @@ function migrateState(s){
   if(!s.history)s.history={};
   if(!s.inspections)s.inspections={};
   if(s.cleanersOnShift==null)s.cleanersOnShift=s.season==='peak'?6:3;
+  // Migrate to multi-manager system
+  if(!s.managers){
+    s.managers=[
+      {id:'m1',name:'De-Mara',pin:s.managerPass||'1234'},
+      {id:'m2',name:'Anita',pin:''},
+      {id:'m3',name:'Ludwig',pin:''},
+    ];
+  }
   return s;
 }
 
@@ -1751,7 +1765,7 @@ function styleHeaderRow(ws,numCols){
 // ═══════════════════════════════════════════
 //  LOGIN
 // ═══════════════════════════════════════════
-let loginRole='manager',currentCleaner=null;
+let loginRole='manager',currentCleaner=null,currentManager=null;
 function setLoginRole(r){
   loginRole=r;
   document.querySelectorAll('.login-tab').forEach((el,i)=>el.classList.toggle('active',(r==='manager'&&i===0)||(r==='cleaner'&&i===1)));
@@ -1760,10 +1774,14 @@ function setLoginRole(r){
 function renderLoginForm(){
   const f=document.getElementById('login-form');
   document.getElementById('login-err').textContent='';
+  const hintEl=document.getElementById('login-hint');
+  if(hintEl)hintEl.textContent='';
   if(loginRole==='manager'){
-    f.innerHTML=`<div class="field"><label>MANAGER PASSWORD</label>
-      <input type="password" id="mgr-pass" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    const opts=(state.managers||[]).map(m=>`<option value="${m.id}">${escH(m.name)}</option>`).join('');
+    f.innerHTML=`<div class="field"><label>YOUR NAME</label><select id="mgr-select" onchange="updateManagerHint()">${opts}</select></div>
+      <div class="field"><label>PIN</label><input type="password" id="mgr-pass" maxlength="4" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()"/></div>
       <button class="btn btn-primary btn-full" onclick="doLogin()">ENTER DASHBOARD →</button>`;
+    setTimeout(updateManagerHint,0);
   }else{
     const opts=state.cleaners.map(c=>`<option value="${c.id}">${escH(c.name)}</option>`).join('');
     f.innerHTML=`<div class="field"><label>YOUR NAME</label><select id="cl-select">${opts}</select></div>
@@ -1771,12 +1789,30 @@ function renderLoginForm(){
       <button class="btn btn-primary btn-full" onclick="doLogin()">START SHIFT →</button>`;
   }
 }
+function updateManagerHint(){
+  const mid=(document.getElementById('mgr-select')||{}).value;
+  const mgr=(state.managers||[]).find(m=>m.id===mid);
+  const hintEl=document.getElementById('login-hint');
+  if(hintEl)hintEl.textContent=mgr&&!mgr.pin?'First time? Enter a 4-digit PIN to set up your account.':'';
+}
 function doLogin(){
   document.getElementById('login-err').textContent='';
   if(loginRole==='manager'){
+    const mid=(document.getElementById('mgr-select')||{}).value;
     const p=(document.getElementById('mgr-pass')||{}).value||'';
-    if(p===state.managerPass){showScreen('manager');renderManager();}
-    else document.getElementById('login-err').textContent='Incorrect password.';
+    const mgr=(state.managers||[]).find(m=>m.id===mid);
+    if(!mgr){document.getElementById('login-err').textContent='Manager not found.';return;}
+    // First-time login: PIN is empty — prompt to set one
+    if(!mgr.pin){
+      if(p.length<4){document.getElementById('login-err').textContent='Choose a 4-digit PIN to set up your account.';return;}
+      if(!/^\d{4}$/.test(p)){document.getElementById('login-err').textContent='PIN must be exactly 4 digits.';return;}
+      mgr.pin=p;
+      saveState();
+      currentManager=mgr;showScreen('manager');renderManager();
+    }else{
+      if(p===mgr.pin){currentManager=mgr;showScreen('manager');renderManager();}
+      else document.getElementById('login-err').textContent='Incorrect PIN.';
+    }
   }else{
     const cid=(document.getElementById('cl-select')||{}).value;
     const pin=(document.getElementById('cl-pin')||{}).value;
@@ -1785,7 +1821,7 @@ function doLogin(){
     else document.getElementById('login-err').textContent='Incorrect PIN.';
   }
 }
-function logout(){currentCleaner=null;showScreen('login');renderLoginForm();}
+function logout(){currentCleaner=null;currentManager=null;showScreen('login');renderLoginForm();}
 function showScreen(n){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(n+'-screen').classList.add('active');}
 
 // ═══════════════════════════════════════════
@@ -2485,7 +2521,22 @@ function renderManage(bld,rooms){
     <div style="border:1px solid var(--border);border-radius:var(--rs);padding:0 10px">${cleanerRows||'<div style="padding:16px;color:var(--muted)">No cleaners.</div>'}</div>
     <div style="margin-top:8px;font-size:10px;color:var(--muted)">Edit name/PIN inline then Save. First ${state.season==='peak'?6:3} cleaners are active for the current season.</div>
   </div>
-  <div id="manage-msg" style="font-size:11px;margin-top:4px"></div>`;
+  <div id="manage-msg" style="font-size:11px;margin-top:4px"></div>
+  <div class="card fi">
+    <div class="card-title">MANAGER ACCOUNTS <span style="color:var(--muted);font-weight:400;font-size:10px">${(state.managers||[]).length} total</span>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:var(--rs);padding:0 10px">
+      ${(state.managers||[]).map((m,idx)=>`
+      <div class="cleaner-manage-row">
+        <div style="font-size:11px;color:var(--muted);width:22px;flex-shrink:0">#${idx+1}</div>
+        <input class="cleaner-edit-name" id="mgr-name-${m.id}" value="${escH(m.name)}" placeholder="Name"/>
+        <input class="cleaner-edit-pin" id="mgr-pin-${m.id}" value="${m.pin}" placeholder="PIN" maxlength="4" type="password"/>
+        <button class="btn btn-primary btn-sm" onclick="saveManagerAccount('${m.id}')">Save</button>
+        ${idx===0?'<div style="width:28px"></div>':`<button class="btn btn-red btn-sm" onclick="removeManagerAccount('${m.id}')">✕</button>`}
+      </div>`).join('')}
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted)">Edit name or PIN inline then Save. Leave PIN blank to force a first-login setup next time.</div>
+  </div>`;
 }
 
 // ── Unit CRUD ──
@@ -2580,6 +2631,23 @@ function showManageMsg(msg,type){
   const el=document.getElementById('manage-msg');if(!el)return;
   el.style.color=type==='err'?'var(--red)':'var(--green)';el.textContent=msg;
   setTimeout(()=>{el.textContent='';},3000);
+}
+
+// ── Manager Account CRUD ──
+function saveManagerAccount(id){
+  const name=document.getElementById('mgr-name-'+id)?.value.trim();
+  const pin=document.getElementById('mgr-pin-'+id)?.value.trim();
+  if(!name){showManageMsg('Enter a name.','err');return;}
+  if(pin&&!/^\d{4}$/.test(pin)){showManageMsg('PIN must be 4 digits (or leave blank for first-login setup).','err');return;}
+  const mgr=(state.managers||[]).find(m=>m.id===id);if(!mgr)return;
+  mgr.name=name;mgr.pin=pin;saveState();
+  showManageMsg(`✓ ${name} saved.`,'ok');renderManagerMain();
+}
+function removeManagerAccount(id){
+  const mgr=(state.managers||[]).find(m=>m.id===id);if(!mgr)return;
+  if(!confirm(`Remove manager "${mgr.name}"?`))return;
+  state.managers=state.managers.filter(m=>m.id!==id);
+  saveState();renderManagerMain();
 }
 
 // ── Room actions ──
