@@ -749,7 +749,62 @@ const REAL_BUILDINGS=[
   {id:'ten_on_v',name:'TEN ON V',short:'Ten on V',units:[{type:'COMPACT',count:33},{type:'STUDIO',count:40},{type:'ONE_BED',count:13},{type:'TWO_BED',count:2}]},
   {id:'eighty2_on_m',name:'EIGHTY2 ON M',short:'Eighty2',units:[{type:'COMPACT',count:22},{type:'STUDIO',count:14},{type:'ONE_BED',count:10},{type:'TWO_BED',count:5},{type:'URBAN',count:3}]},
   {id:'onehundred_on_m',name:'ONEHUNDRED ON M',short:'100 on M',units:[{type:'COMPACT',count:25},{type:'STUDIO',count:22},{type:'ONE_BED',count:15},{type:'TWO_BED',count:8},{type:'THREE_BED',count:1}]},
-  {id:'one26_on_m',name:'ONE26 ON M',short:'126 on M',units:[{type:'COMPACT',count:21},{type:'STUDIO',count:11},{type:'TWO_BED',count:2},{type:'ONE_BED',count:8}]},
+  {id:'one26_on_m',name:'ONE26 ON M',short:'126 on M',units:[{type:'COMPACT',count:21},{type:'STUDIO',count:11},{type:'TWO_BED',count:2},{type:'ONE_BED',count:8}],
+    exactRooms:[
+      // Floor 1
+      {number:'101',type:'COMPACT',floor:1},
+      {number:'103',type:'STUDIO',floor:1},
+      {number:'104',type:'COMPACT',floor:1},
+      {number:'105',type:'COMPACT',floor:1},
+      {number:'106',type:'COMPACT',floor:1},
+      {number:'107',type:'STUDIO',floor:1},
+      // Floor 2
+      {number:'203',type:'COMPACT',floor:2},
+      {number:'204',type:'ONE_BED',floor:2},
+      {number:'205',type:'STUDIO',floor:2},
+      {number:'206',type:'STUDIO',floor:2},
+      {number:'207',type:'COMPACT',floor:2},
+      {number:'209',type:'COMPACT',floor:2},
+      {number:'210',type:'STUDIO',floor:2},
+      // Floor 3
+      {number:'301',type:'COMPACT',floor:3},
+      {number:'302',type:'COMPACT',floor:3},
+      {number:'303',type:'COMPACT',floor:3},
+      {number:'304',type:'ONE_BED',floor:3},
+      {number:'305',type:'STUDIO',floor:3},
+      {number:'306',type:'STUDIO',floor:3},
+      {number:'307',type:'COMPACT',floor:3},
+      {number:'309',type:'COMPACT',floor:3},
+      {number:'310',type:'STUDIO',floor:3},
+      // Floor 4
+      {number:'401',type:'COMPACT',floor:4},
+      {number:'403',type:'COMPACT',floor:4},
+      {number:'404',type:'ONE_BED',floor:4},
+      {number:'406',type:'STUDIO',floor:4},
+      {number:'408',type:'COMPACT',floor:4},
+      {number:'409',type:'COMPACT',floor:4},
+      {number:'410',type:'STUDIO',floor:4},
+      // Floor 5
+      {number:'502',type:'COMPACT',floor:5},
+      {number:'503',type:'COMPACT',floor:5},
+      {number:'504',type:'ONE_BED',floor:5},
+      {number:'505',type:'STUDIO',floor:5},
+      {number:'506',type:'STUDIO',floor:5},
+      {number:'508',type:'COMPACT',floor:5},
+      // Floor 6
+      {number:'603',type:'ONE_BED',floor:6},
+      {number:'604',type:'COMPACT',floor:6},
+      {number:'605',type:'ONE_BED',floor:6},
+      // Floor 7
+      {number:'701',type:'ONE_BED',floor:7},
+      {number:'702',type:'TWO_BED',floor:7},
+      {number:'704',type:'ONE_BED',floor:7},
+      {number:'705',type:'ONE_BED',floor:7},
+      // Floor 8
+      {number:'801',type:'TWO_BED',floor:8},
+      {number:'802',type:'TWO_BED',floor:8},
+    ]
+  },
   {id:'one46_on_m',name:'ONE46 ON M',short:'146 on M',units:[{type:'COMPACT',count:20},{type:'STUDIO',count:15},{type:'TWO_BED',count:6},{type:'ONE_BED',count:6}]},
   {id:'three43_on_b',name:'THREE43 ON B',short:'343 on B',units:[{type:'COMPACT',count:32},{type:'STUDIO',count:20},{type:'TWO_BED',count:15},{type:'ONE_BED',count:8},{type:'THREE_BED',count:1}]},
 ];
@@ -765,18 +820,23 @@ function generateGroundFloor(bldId){
     return room;
   });
 }
-function generateRoomsFromUnits(bldId,unitDef){
+function generateRoomsFromUnits(bldId,unitDef,exactRooms){
   // Ground floor first (G01-G04), then upper floors
   const groundFloor=generateGroundFloor(bldId);
   const rooms=[...groundFloor];
-  let seq=1;
-  unitDef.forEach(({type,count})=>{
-    for(let i=0;i<count;i++){
-      const floor=Math.ceil(seq/12),pos=seq%12||12;
-      rooms.push(makeRoom(bldId,`${floor}${String(pos).padStart(2,'0')}`,type,floor));
-      seq++;
-    }
-  });
+  if(exactRooms&&exactRooms.length){
+    // Use exact room list — preserves correct numbering and types
+    exactRooms.forEach(r=>rooms.push(makeRoom(bldId,r.number,r.type,r.floor)));
+  }else{
+    let seq=1;
+    unitDef.forEach(({type,count})=>{
+      for(let i=0;i<count;i++){
+        const floor=Math.ceil(seq/12),pos=seq%12||12;
+        rooms.push(makeRoom(bldId,`${floor}${String(pos).padStart(2,'0')}`,type,floor));
+        seq++;
+      }
+    });
+  }
   return rooms;
 }
 
@@ -793,7 +853,7 @@ function defaultState(){
   return {
     season:'peak', activeBuilding:'six_on_n',
     cleanersOnShift:6,
-    buildings:REAL_BUILDINGS.map(b=>({id:b.id,name:b.name,short:b.short,unitDef:b.units,rooms:generateRoomsFromUnits(b.id,b.units)})),
+    buildings:REAL_BUILDINGS.map(b=>({id:b.id,name:b.name,short:b.short,unitDef:b.units,rooms:generateRoomsFromUnits(b.id,b.units,b.exactRooms)})),
     cleaners:[
       {id:'c1',name:'Amara N.',pin:'1111'},{id:'c2',name:'Thabo M.',pin:'2222'},
       {id:'c3',name:'Zanele K.',pin:'3333'},{id:'c4',name:'Sipho D.',pin:'4444'},
@@ -818,7 +878,7 @@ function migrateState(s){
   REAL_BUILDINGS.forEach(rb=>{
     if(!s.buildings.find(b=>b.id===rb.id)){
       // Only add if completely missing
-      s.buildings.push({id:rb.id,name:rb.name,short:rb.short,unitDef:rb.units,rooms:generateRoomsFromUnits(rb.id,rb.units)});
+      s.buildings.push({id:rb.id,name:rb.name,short:rb.short,unitDef:rb.units,rooms:generateRoomsFromUnits(rb.id,rb.units,rb.exactRooms)});
     }
   });
   // Ensure every building has at least one ground floor unit — add only if none exist
