@@ -2033,19 +2033,14 @@ function renderRoster(bld,rooms){
     if(e.departed) badge+=` <span class="roster-badge rb-departed">✓ DEPARTED</span>`;
     if(e.inhouse) badge+=` <span class="roster-badge rb-inhouse">🏠 IN HOUSE</span>`;
 
-    const rowBg=e.departed?'background:#D6F4F6;':e.inhouse?'background:#EEE8FF;':'';
+    // Row colour: departed = teal, in house = soft purple, both = teal takes priority
+    const rowBg=e.departed?'background:#C2EEF0;border-left:4px solid var(--teal);':e.inhouse?'background:#E4DCFF;border-left:4px solid var(--violet)':'';
 
     return `<tr style="${rowBg}">
       <td><b>Unit ${escH(room.number)}</b></td>
       <td><span style="color:${rt.color};font-weight:600">${rt.icon} ${rt.short}</span></td>
       <td>Fl. ${room.floor}</td>
       <td>${badge}</td>
-      <td>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--muted)">
-          <input type="checkbox" onchange="setRoster('${bld.id}','${dateStr}','${room.id}','checkout',this.checked)" ${e.checkout?'checked':''}
-            style="accent-color:var(--amber);width:14px;height:14px"/> Checkout
-        </label>
-      </td>
       <td>
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--muted)">
           <input type="checkbox" onchange="setRoster('${bld.id}','${dateStr}','${room.id}','checkin',this.checked)" ${e.checkin?'checked':''}
@@ -2108,7 +2103,7 @@ function renderRoster(bld,rooms){
     </div>
     <div class="roster-table-wrap">
       <table class="roster-table">
-        <thead><tr><th>UNIT</th><th>TYPE</th><th>FLOOR</th><th>STATUS</th><th>CHECKOUT</th><th>CHECK-IN</th><th>DEPARTED</th><th>IN HOUSE</th><th>GUEST</th></tr></thead>
+        <thead><tr><th>UNIT</th><th>TYPE</th><th>FLOOR</th><th>STATUS</th><th>CHECK-IN</th><th>DEPARTED</th><th>IN HOUSE</th><th>GUEST</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
