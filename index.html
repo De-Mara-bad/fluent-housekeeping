@@ -977,11 +977,11 @@ function defaultState(){
     season:'peak', activeBuilding:'six_on_n',
     cleanersOnShift:6,
     buildings:REAL_BUILDINGS.map(b=>({id:b.id,name:b.name,short:b.short,unitDef:b.units,rooms:generateRoomsFromUnits(b.id,b.units,b.exactRooms)})),
-    cleaners:[
-      {id:'c1',name:'Amara N.',pin:'1111'},{id:'c2',name:'Thabo M.',pin:'2222'},
-      {id:'c3',name:'Zanele K.',pin:'3333'},{id:'c4',name:'Sipho D.',pin:'4444'},
-      {id:'c5',name:'Lindiwe V.',pin:'5555'},{id:'c6',name:'Bongani H.',pin:'6666'},
-    ],
+  cleaners:[
+      {id:'c1',name:'Amara N.',pin:'1111',buildingId:'six_on_n'},{id:'c2',name:'Thabo M.',pin:'2222',buildingId:'six_on_n'},
+      {id:'c3',name:'Zanele K.',pin:'3333',buildingId:'six_on_n'},{id:'c4',name:'Sipho D.',pin:'4444',buildingId:'six_on_n'},
+      {id:'c5',name:'Lindiwe V.',pin:'5555',buildingId:'six_on_n'},{id:'c6',name:'Bongani H.',pin:'6666',buildingId:'six_on_n'},
+    ], 
     managerPass:'1234',
     managers:[
       {id:'m1',name:'De-Mara',pin:'1234'},
@@ -1013,6 +1013,10 @@ function migrateState(s){
       bld.rooms.unshift(...gf);
     }
   });
+   if(!s.cleaners)s.cleaners=[];
+  s.cleaners.forEach(c=>{ if(!c.buildingId) c.buildingId=s.activeBuilding||(s.buildings[0]&&s.buildings[0].id)||''; });
+  if(!s.roster)s.roster={};
+  s.cleaners.forEach(c=>{ if(!c.buildingId) c.buildingId=s.activeBuilding||(s.buildings[0]&&s.buildings[0].id)||''; });
   if(!s.roster)s.roster={};
   if(!s.schedules)s.schedules={};
   if(!s.history)s.history={};
