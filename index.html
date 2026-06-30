@@ -1349,6 +1349,18 @@ function migrateState(s){
     });
     s._voMigrated=true;
   }
+  // One-time: create one building-scoped supervisor account per building
+  // (placeholder names — De-Mara renames + sets PINs later in Manage).
+  // Only adds a supervisor if that building doesn't already have one.
+  if(!s._supervisorsMigrated){
+    REAL_BUILDINGS.forEach(rb=>{
+      const hasSupervisor=s.managers.some(m=>m.role==='building'&&m.buildingId===rb.id);
+      if(!hasSupervisor){
+        s.managers.push({id:'sup_'+rb.id,name:'Supervisor – '+rb.short,pin:'',role:'building',buildingId:rb.id});
+      }
+    });
+    s._supervisorsMigrated=true;
+  }
   return s;
 }
 
