@@ -1033,8 +1033,6 @@ function migrateState(s){
    if(!s.cleaners)s.cleaners=[];
   s.cleaners.forEach(c=>{ if(!c.buildingId) c.buildingId=s.activeBuilding||(s.buildings[0]&&s.buildings[0].id)||''; });
   if(!s.roster)s.roster={};
-  s.cleaners.forEach(c=>{ if(!c.buildingId) c.buildingId=s.activeBuilding||(s.buildings[0]&&s.buildings[0].id)||''; });
-  if(!s.roster)s.roster={};
   if(!s.schedules)s.schedules={};
   if(!s.history)s.history={};
   if(!s.inspections)s.inspections={};
@@ -1162,7 +1160,7 @@ function activeCleaner(){
   const pool=state.cleaners.filter(c=>c.buildingId===bldId);
   const count=state.cleanersOnShift!=null?state.cleanersOnShift:(state.season==='peak'?6:3);
   return pool.slice(0,Math.min(count,pool.length));
-
+}
 function currentBld(){return state.buildings.find(b=>b.id===state.activeBuilding)||state.buildings[0];}
 function currentRooms(){return(currentBld()||{rooms:[]}).rooms;}
 function updateRoom(bldId,roomId,patch){
