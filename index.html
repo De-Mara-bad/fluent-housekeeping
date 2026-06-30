@@ -961,9 +961,9 @@ function generateGroundFloor(bldId){
   });
 }
 function generateRoomsFromUnits(bldId,unitDef,exactRooms){
-  // Ground floor first (G01-G04), then upper floors
-  const groundFloor=generateGroundFloor(bldId);
-  const rooms=[...groundFloor];
+  // No automatic ground floor units — only added if explicitly specified
+  // via exactRooms, or added manually later in Manage.
+  const rooms=[];
   if(exactRooms&&exactRooms.length){
     // Use exact room list — preserves correct numbering and types
     exactRooms.forEach(r=>rooms.push(makeRoom(bldId,r.number,r.type,r.floor)));
@@ -1021,13 +1021,18 @@ function migrateState(s){
       s.buildings.push({id:rb.id,name:rb.name,short:rb.short,unitDef:rb.units,rooms:generateRoomsFromUnits(rb.id,rb.units,rb.exactRooms)});
     }
   });
-  // Ensure every building has at least one ground floor unit — add only if none exist
-  // This does NOT remove or change any existing rooms
+  // Ground floor units are NEVER auto-added — only kept if part of a
+  // building's curated exactRooms list, or added manually via Manage.
+  // This just cleans up any leftover synthetic G01-G04 units from older
+  // versions of the app that don't belong on the real room list.
   s.buildings.forEach(bld=>{
-    const hasGround=bld.rooms.some(r=>String(r.number).startsWith('G'));
-    if(!hasGround){
-      const gf=generateGroundFloor(bld.id);
-      bld.rooms.unshift(...gf);
+    const rb=REAL_BUILDINGS.find(r=>r.id===bld.id);
+    if(rb&&rb.exactRooms&&rb.exactRooms.length){
+      const realNumbers=new Set(rb.exactRooms.map(r=>String(r.number)));
+      bld.rooms=bld.rooms.filter(r=>{
+        const isSyntheticGround=/^G0[1-4]$/.test(r.number);
+        return !isSyntheticGround||realNumbers.has(r.number);
+      });
     }
   });
    if(!s.cleaners)s.cleaners=[];
