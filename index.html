@@ -579,6 +579,12 @@ tr:hover td{background:var(--surface2)}
   #mgr-mobile-header{display:none!important}
   #mgr-bottom-nav{display:none!important}
 }
+
+/* View-only manager mode — locks all interactive elements except History */
+.vo-locked{pointer-events:none!important;user-select:none;}
+.vo-locked button,.vo-locked input,.vo-locked select,.vo-locked textarea{opacity:.55;cursor:not-allowed!important;}
+.vo-banner{display:flex;align-items:center;gap:8px;background:#FFF4DE;border:1px solid #F2D9A6;
+  color:#8A6A1E;font-size:11px;font-weight:700;padding:9px 14px;border-radius:var(--rs);margin-bottom:10px;}
 </style>
 </head>
 <body>
@@ -1280,8 +1286,8 @@ function defaultState(){
     managerPass:'1234',
     managers:[
       {id:'m1',name:'De-Mara',pin:'1234',role:'admin',buildingId:''},
-      {id:'m2',name:'Anita',pin:'',role:'admin',buildingId:''},
-      {id:'m3',name:'Ludwig',pin:'',role:'admin',buildingId:''},
+      {id:'m2',name:'Anita',pin:'',role:'viewonly',buildingId:''},
+      {id:'m3',name:'Ludwig',pin:'',role:'viewonly',buildingId:''},
     ],
     roster:{},
     schedules:{},
@@ -1324,8 +1330,8 @@ function migrateState(s){
   if(!s.managers){
     s.managers=[
       {id:'m1',name:'De-Mara',pin:s.managerPass||'1234',role:'admin',buildingId:''},
-      {id:'m2',name:'Anita',pin:'',role:'admin',buildingId:''},
-      {id:'m3',name:'Ludwig',pin:'',role:'admin',buildingId:''},
+      {id:'m2',name:'Anita',pin:'',role:'viewonly',buildingId:''},
+      {id:'m3',name:'Ludwig',pin:'',role:'viewonly',buildingId:''},
     ];
   }
   // Backfill role/buildingId on any older manager records (pre-existing
@@ -1334,6 +1340,15 @@ function migrateState(s){
     if(!m.role)m.role='admin';
     if(m.buildingId==null)m.buildingId='';
   });
+  // One-time: Anita & Ludwig move from full admin access to view-only
+  // (full History access retained — see isViewOnlyMgr()). Runs once only,
+  // so a deliberate later promotion back to admin by De-Mara isn't undone.
+  if(!s._voMigrated){
+    s.managers.forEach(m=>{
+      if((m.name==='Anita'||m.name==='Ludwig')&&m.role==='admin')m.role='viewonly';
+    });
+    s._voMigrated=true;
+  }
   return s;
 }
 
@@ -1774,10 +1789,12 @@ function selectInspRoom(roomId){
   renderManagerMain();
 }
 function setInspRating(bldId,dateStr,roomId,rating){
+  if(isViewOnlyMgr())return;
   saveInspection(bldId,dateStr,roomId,{rating});
   renderManagerMain();
 }
 function toggleInspItem(bldId,dateStr,roomId,key,checked){
+  if(isViewOnlyMgr())return;
   const insp=getInspection(bldId,dateStr,roomId);
   const items={...insp.items,[key]:checked};
   saveInspection(bldId,dateStr,roomId,{items});
@@ -1785,9 +1802,11 @@ function toggleInspItem(bldId,dateStr,roomId,key,checked){
   updateFlagBadge();
 }
 function saveInspNotes(bldId,dateStr,roomId,notes){
+  if(isViewOnlyMgr())return;
   saveInspection(bldId,dateStr,roomId,{notes});
 }
 function clearInspection(bldId,dateStr,roomId){
+  if(isViewOnlyMgr())return;
   if(!confirm('Clear all inspection data for this unit?'))return;
   if(state.inspections[bldId]&&state.inspections[bldId][dateStr])
     delete state.inspections[bldId][dateStr][roomId];
@@ -1796,6 +1815,7 @@ function clearInspection(bldId,dateStr,roomId){
 
 // ── SPEECH TO TEXT ──
 function toggleMic(bldId,dateStr,roomId){
+  if(isViewOnlyMgr())return;
   const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SpeechRecognition){
     alert('Speech recognition is not supported in this browser.\nTry Chrome on Android or desktop Chrome.');
@@ -2406,6 +2426,9 @@ function updateShiftDisplay(){
 function isBuildingScopedMgr(){
   return !!(currentManager&&currentManager.role==='building');
 }
+function isViewOnlyMgr(){
+  return !!(currentManager&&currentManager.role==='viewonly');
+}
 function selectBuilding(id){
   if(isBuildingScopedMgr())return; // building managers can't switch buildings
   state.activeBuilding=id;fFloor='all';fStatus='all';fCleaner='all';
@@ -2484,14 +2507,18 @@ function renderManagerMain(){
   if(isBuildingScopedMgr()&&['rooms','history','manage'].includes(mgView))mgView='overview';
   const bld=currentBld(),rooms=currentRooms();
   const tabs=isBuildingScopedMgr()?'':`<div class="bld-tabs fi">${state.buildings.map(b=>`<button class="bld-tab${b.id===state.activeBuilding?' active':''}" onclick="selectBuilding('${b.id}')">${escH(b.short||b.name)}</button>`).join('')}</div>`;
-  if(mgView==='overview')      el.innerHTML=tabs+renderOverview(bld,rooms);
-  else if(mgView==='roster')   el.innerHTML=tabs+renderRoster(bld,rooms);
-  else if(mgView==='scheduler') el.innerHTML=tabs+renderScheduler(bld,rooms);
-  else if(mgView==='rooms')    el.innerHTML=tabs+renderRooms(bld,rooms);
-  else if(mgView==='cleaners') el.innerHTML=tabs+renderCleaners(rooms);
-  else if(mgView==='inspection') el.innerHTML=tabs+renderInspection(bld,rooms);
-  else if(mgView==='history')  el.innerHTML=tabs+renderHistory(bld,rooms);
-  else if(mgView==='manage')   el.innerHTML=tabs+renderManage(bld,rooms);
+  let content='';
+  if(mgView==='overview')      content=renderOverview(bld,rooms);
+  else if(mgView==='roster')   content=renderRoster(bld,rooms);
+  else if(mgView==='scheduler') content=renderScheduler(bld,rooms);
+  else if(mgView==='rooms')    content=renderRooms(bld,rooms);
+  else if(mgView==='cleaners') content=renderCleaners(rooms);
+  else if(mgView==='inspection') content=renderInspection(bld,rooms);
+  else if(mgView==='history')  content=renderHistory(bld,rooms);
+  else if(mgView==='manage')   content=renderManage(bld,rooms);
+  const voActive=isViewOnlyMgr()&&mgView!=='history';
+  const voBanner=voActive?`<div class="vo-banner">👁 View-only access — you can see everything here, but changes are disabled. Full access is available in History.</div>`:'';
+  el.innerHTML=tabs+voBanner+(voActive?`<div class="vo-locked">${content}</div>`:content);
   bindActions();
   if(mgView==='scheduler') initDrag();
   updateFlagBadge();
@@ -2679,16 +2706,19 @@ function shiftRosterDate(d){
   const dt=new Date(rosterDate);dt.setDate(dt.getDate()+d);rosterDate=dt.toISOString().slice(0,10);renderManagerMain();
 }
 function setRoster(bldId,dateStr,roomId,field,value){
+  if(isViewOnlyMgr())return;
   setRosterEntry(bldId,dateStr,roomId,{[field]:value});
   // update status chip badge without full re-render
   updateFlagBadge();
 }
 function markAllCheckout(bldId,dateStr){
+  if(isViewOnlyMgr())return;
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
   bld.rooms.forEach(r=>setRosterEntry(bldId,dateStr,r.id,{checkout:true}));
   renderManagerMain();
 }
 function clearRosterDay(bldId,dateStr){
+  if(isViewOnlyMgr())return;
   if(!confirm('Clear all roster entries for this day?'))return;
   if(state.roster[bldId])delete state.roster[bldId][dateStr];
   saveState();renderManagerMain();
@@ -2805,17 +2835,20 @@ function shiftSchedDate(d){
 }
 
 function removeFromSchedule(bldId,dateStr,cleanerId,roomId){
+  if(isViewOnlyMgr())return;
   const cur=getSchedule(bldId,dateStr,cleanerId);
   setSchedule(bldId,dateStr,cleanerId,cur.filter(id=>id!==roomId));
   renderManagerMain();
 }
 
 function clearCleanerSchedule(bldId,dateStr,cleanerId){
+  if(isViewOnlyMgr())return;
   setSchedule(bldId,dateStr,cleanerId,[]);
   renderManagerMain();
 }
 
 function autoSchedule(bldId,dateStr){
+  if(isViewOnlyMgr())return;
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
   const cls=activeCleaner();if(!cls.length){alert('No cleaners on shift.');return;}
   // priority: 2-bed, 3-bed, 1-bed, studio, compact, urban
@@ -2834,6 +2867,7 @@ function autoSchedule(bldId,dateStr){
 }
 
 function schedFromRoster(bldId,dateStr){
+  if(isViewOnlyMgr())return;
   // Only schedule units that have checkout on this date
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
   const cls=activeCleaner();if(!cls.length){alert('No cleaners on shift.');return;}
@@ -2863,6 +2897,7 @@ function initDrag(){
 }
 
 function schedTapPill(el,roomId,from){
+  if(isViewOnlyMgr())return;
   const bldId=state.activeBuilding,dateStr=schedDate;
   // If a room is already selected and this is a cleaner zone tap via pill — assign
   if(tapSelected.roomId&&tapSelected.roomId!==roomId&&from!=='pool'){
@@ -2882,6 +2917,7 @@ function schedTapPill(el,roomId,from){
 }
 
 function schedTapZone(cleanerId){
+  if(isViewOnlyMgr())return;
   if(!tapSelected.roomId) return;
   schedAssignTo(cleanerId);
 }
@@ -2903,6 +2939,7 @@ function schedAssignTo(cleanerId){
 }
 
 function schedReturnToPool(roomId,fromCleaner){
+  if(isViewOnlyMgr())return;
   if(!fromCleaner)return;
   const bldId=state.activeBuilding,dateStr=schedDate;
   setSchedule(bldId,dateStr,fromCleaner,getSchedule(bldId,dateStr,fromCleaner).filter(id=>id!==roomId));
@@ -3059,7 +3096,7 @@ function renderManage(bld,rooms){
       <select id="cl-bld-${c.id}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:7px 8px;font-size:11px;color:var(--text)">
         ${state.buildings.map(b=>`<option value="${b.id}"${c.buildingId===b.id?' selected':''}>${escH(b.short||b.name)}</option>`).join('')}
       </select>
-      <input class="cleaner-edit-pin" id="cl-pin-${c.id}" value="${c.pin}" placeholder="PIN" maxlength="4"/>
+      <input class="cleaner-edit-pin" id="cl-pin-${c.id}" value="${c.pin}" placeholder="PIN" maxlength="4" type="${isViewOnlyMgr()?'password':'text'}"/>
       <button class="btn btn-primary btn-sm" onclick="saveCleaner('${c.id}')">Save</button>
       <button class="btn btn-red btn-sm" onclick="removeCleaner('${c.id}')">✕</button>
     </div>`).join('');
@@ -3095,6 +3132,7 @@ function renderManage(bld,rooms){
         <input class="cleaner-edit-name" id="mgr-name-${m.id}" value="${escH(m.name)}" placeholder="Name"/>
         <select id="mgr-role-${m.id}" onchange="toggleMgrBldField('${m.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:7px 8px;font-size:11px;color:var(--text)">
           <option value="admin"${m.role==='admin'?' selected':''}>Head of Ops (all buildings)</option>
+          <option value="viewonly"${m.role==='viewonly'?' selected':''}>Head of Ops (View Only)</option>
           <option value="building"${m.role==='building'?' selected':''}>Housekeeping Manager (one building)</option>
         </select>
         <select id="mgr-bld-${m.id}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:7px 8px;font-size:11px;color:var(--text);${m.role==='building'?'':'display:none'}">
@@ -3105,13 +3143,14 @@ function renderManage(bld,rooms){
         ${idx===0?'<div style="width:28px"></div>':`<button class="btn btn-red btn-sm" onclick="removeManagerAccount('${m.id}')">✕</button>`}
       </div>`).join('')}
     </div>
-    <div style="margin-top:8px;font-size:10px;color:var(--muted)">Edit name, role, building, or PIN inline then Save. Leave PIN blank to force a first-login setup next time. Housekeeping Managers only see Overview, Scheduler, Cleaners, Roster and Inspection for their one building.</div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted)">Edit name, role, building, or PIN inline then Save. Leave PIN blank to force a first-login setup next time. Housekeeping Managers only see Overview, Scheduler, Cleaners, Roster and Inspection for their one building. View Only managers see every tab across all buildings but can't make any changes — except History, which stays fully editable for them.</div>
   </div>`;
 }
 
 // ── Unit CRUD ──
 let _editBldId=null,_editRoomId=null;
 function openAddUnit(){
+  if(isViewOnlyMgr())return;
   _editBldId=state.activeBuilding;_editRoomId=null;
   document.getElementById('u-number').value='';
   document.getElementById('u-type').value='COMPACT';
@@ -3121,6 +3160,7 @@ function openAddUnit(){
   openModal('modal-unit');
 }
 function openEditUnit(bldId,roomId){
+  if(isViewOnlyMgr())return;
   const bld=state.buildings.find(b=>b.id===bldId);
   const room=bld&&bld.rooms.find(r=>r.id===roomId);if(!room)return;
   _editBldId=bldId;_editRoomId=roomId;
@@ -3132,6 +3172,7 @@ function openEditUnit(bldId,roomId){
   openModal('modal-unit');
 }
 function saveUnit(){
+  if(isViewOnlyMgr())return;
   const number=document.getElementById('u-number').value.trim();
   const type=document.getElementById('u-type').value;
   const floorRaw=document.getElementById('u-floor').value.trim();
@@ -3155,6 +3196,7 @@ function saveUnit(){
   saveState();closeModal('modal-unit');renderManagerMain();
 }
 function removeUnit(bldId,roomId){
+  if(isViewOnlyMgr())return;
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
   const room=bld.rooms.find(r=>r.id===roomId);if(!room)return;
   if(!confirm(`Remove unit ${room.number} from ${bld.name}?`))return;
@@ -3162,6 +3204,7 @@ function removeUnit(bldId,roomId){
   saveState();renderManagerMain();
 }
 function autoNumberUnits(bldId){
+  if(isViewOnlyMgr())return;
   if(!confirm('Auto-number all units by floor?'))return;
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
   const sorted=[...bld.rooms].sort((a,b)=>a.floor-b.floor);
@@ -3177,6 +3220,7 @@ function autoNumberUnits(bldId){
 
 // ── Cleaner CRUD ──
 function saveCleaner(id){
+  if(isViewOnlyMgr())return;
   const name=document.getElementById('cl-name-'+id)?.value.trim();
   const pin=document.getElementById('cl-pin-'+id)?.value.trim();
   const bldId=document.getElementById('cl-bld-'+id)?.value;
@@ -3187,11 +3231,13 @@ function saveCleaner(id){
   showManageMsg(`✓ ${name} saved.`,'ok');renderManager();
 }
 function addNewCleaner(){
+  if(isViewOnlyMgr())return;
   const id='c'+Date.now();state.cleaners.push({id,name:'New Cleaner',pin:'0000',buildingId:state.activeBuilding});
   saveState();renderManagerMain();
   setTimeout(()=>{const el=document.getElementById('cl-name-'+id);if(el){el.select();el.scrollIntoView({behavior:'smooth',block:'center'});}},80);
 }
 function removeCleaner(id){
+  if(isViewOnlyMgr())return;
   const cl=state.cleaners.find(c=>c.id===id);if(!cl)return;
   if(!confirm(`Remove "${cl.name}"?`))return;
   state.buildings.forEach(bld=>bld.rooms.forEach(r=>{if(r.assignedTo===id)r.assignedTo=null;}));
@@ -3211,6 +3257,7 @@ function toggleMgrBldField(id){
   if(bldSel)bldSel.style.display=role==='building'?'':'none';
 }
 function saveManagerAccount(id){
+  if(isViewOnlyMgr())return;
   const name=document.getElementById('mgr-name-'+id)?.value.trim();
   const pin=document.getElementById('mgr-pin-'+id)?.value.trim();
   const role=document.getElementById('mgr-role-'+id)?.value||'admin';
@@ -3223,12 +3270,14 @@ function saveManagerAccount(id){
   showManageMsg(`✓ ${name} saved.`,'ok');renderManagerMain();
 }
 function removeManagerAccount(id){
+  if(isViewOnlyMgr())return;
   const mgr=(state.managers||[]).find(m=>m.id===id);if(!mgr)return;
   if(!confirm(`Remove manager "${mgr.name}"?`))return;
   state.managers=state.managers.filter(m=>m.id!==id);
   saveState();renderManagerMain();
 }
 function addNewManager(){
+  if(isViewOnlyMgr())return;
   const id='m'+Date.now();
   state.managers.push({id,name:'New Manager',pin:'',role:'building',buildingId:state.activeBuilding});
   saveState();renderManagerMain();
@@ -3247,18 +3296,20 @@ function bindActions(){
     });
   });
 }
-function assignRoom(bldId,roomId,cleanerId){updateRoom(bldId,roomId,{assignedTo:cleanerId||null});}
-function doStartRoom(b,id){updateRoom(b,id,{status:'IN_PROGRESS',startedAt:Date.now(),completedAt:null,duration:null});renderManagerMain();}
+function assignRoom(bldId,roomId,cleanerId){if(isViewOnlyMgr())return;updateRoom(bldId,roomId,{assignedTo:cleanerId||null});}
+function doStartRoom(b,id){if(isViewOnlyMgr())return;updateRoom(b,id,{status:'IN_PROGRESS',startedAt:Date.now(),completedAt:null,duration:null});renderManagerMain();}
 function doDoneRoom(b,id){
+  if(isViewOnlyMgr())return;
   const bld=state.buildings.find(x=>x.id===b);
   const room=bld&&bld.rooms.find(r=>r.id===id);if(!room)return;
   const dur=room.startedAt?Math.floor((Date.now()-room.startedAt)/60000):RT[room.type].mins;
   updateRoom(b,id,{status:dur>RT[room.type].mins*1.4?'FLAGGED':'DONE',completedAt:Date.now(),duration:dur});
   renderManagerMain();
 }
-function doFlagRoom(b,id){updateRoom(b,id,{status:'FLAGGED'});renderManagerMain();}
-function doResetRoom(b,id){updateRoom(b,id,{status:'PENDING',startedAt:null,completedAt:null,duration:null,assignedTo:null});renderManagerMain();}
+function doFlagRoom(b,id){if(isViewOnlyMgr())return;updateRoom(b,id,{status:'FLAGGED'});renderManagerMain();}
+function doResetRoom(b,id){if(isViewOnlyMgr())return;updateRoom(b,id,{status:'PENDING',startedAt:null,completedAt:null,duration:null,assignedTo:null});renderManagerMain();}
 function autoAssign(){
+  if(isViewOnlyMgr())return;
   const bld=currentBld();if(!bld)return;
   const cls=activeCleaner();if(!cls.length){alert('No cleaners on shift.');return;}
   const loads={};cls.forEach(c=>{loads[c.id]=0;});
@@ -3266,6 +3317,7 @@ function autoAssign(){
   saveState();renderManagerMain();
 }
 function resetBuilding(){
+  if(isViewOnlyMgr())return;
   const bld=currentBld();if(!bld)return;
   if(!confirm(`Reset all rooms in ${bld.name} to PENDING?\n\nThis will save today's data to History first.`))return;
   snapshotDay(bld.id); // save before clearing
