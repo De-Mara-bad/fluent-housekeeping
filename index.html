@@ -1279,9 +1279,9 @@ function defaultState(){
     ], 
     managerPass:'1234',
     managers:[
-      {id:'m1',name:'De-Mara',pin:'1234'},
-      {id:'m2',name:'Anita',pin:''},
-      {id:'m3',name:'Ludwig',pin:''},
+      {id:'m1',name:'De-Mara',pin:'1234',role:'admin',buildingId:''},
+      {id:'m2',name:'Anita',pin:'',role:'admin',buildingId:''},
+      {id:'m3',name:'Ludwig',pin:'',role:'admin',buildingId:''},
     ],
     roster:{},
     schedules:{},
@@ -1323,11 +1323,17 @@ function migrateState(s){
   // Migrate to multi-manager system
   if(!s.managers){
     s.managers=[
-      {id:'m1',name:'De-Mara',pin:s.managerPass||'1234'},
-      {id:'m2',name:'Anita',pin:''},
-      {id:'m3',name:'Ludwig',pin:''},
+      {id:'m1',name:'De-Mara',pin:s.managerPass||'1234',role:'admin',buildingId:''},
+      {id:'m2',name:'Anita',pin:'',role:'admin',buildingId:''},
+      {id:'m3',name:'Ludwig',pin:'',role:'admin',buildingId:''},
     ];
   }
+  // Backfill role/buildingId on any older manager records (pre-existing
+  // managers default to 'admin' so nobody loses access they already had)
+  s.managers.forEach(m=>{
+    if(!m.role)m.role='admin';
+    if(m.buildingId==null)m.buildingId='';
+  });
   return s;
 }
 
@@ -2328,9 +2334,15 @@ function doLogin(){
       if(!/^\d{4}$/.test(p)){document.getElementById('login-err').textContent='PIN must be exactly 4 digits.';return;}
       mgr.pin=p;
       saveState();
-      currentManager=mgr;showScreen('manager');renderManager();
+      currentManager=mgr;
+      if(mgr.role==='building'&&mgr.buildingId)state.activeBuilding=mgr.buildingId;
+      showScreen('manager');renderManager();
     }else{
-      if(p===mgr.pin){currentManager=mgr;showScreen('manager');renderManager();}
+      if(p===mgr.pin){
+        currentManager=mgr;
+        if(mgr.role==='building'&&mgr.buildingId)state.activeBuilding=mgr.buildingId;
+        showScreen('manager');renderManager();
+      }
       else document.getElementById('login-err').textContent='Incorrect PIN.';
     }
    }else{
@@ -2353,6 +2365,9 @@ let rosterDate=todayStr();
 let schedDate=todayStr();
 
 function mgNav(v){
+  // Building-scoped managers only get Overview, Scheduler, Cleaners, Roster, Inspection
+  const restrictedViews=['rooms','history','manage'];
+  if(isBuildingScopedMgr()&&restrictedViews.includes(v))v='overview';
   mgView=v;fFloor='all';fStatus='all';fCleaner='all';
   // Desktop sidebar
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -2388,23 +2403,50 @@ function updateShiftDisplay(){
   if(numEl)numEl.textContent=cls.length;
   if(namesEl)namesEl.innerHTML=cls.map(c=>`<div>${escH(c.name)}</div>`).join('');
 }
+function isBuildingScopedMgr(){
+  return !!(currentManager&&currentManager.role==='building');
+}
 function selectBuilding(id){
+  if(isBuildingScopedMgr())return; // building managers can't switch buildings
   state.activeBuilding=id;fFloor='all';fStatus='all';fCleaner='all';
   saveState();renderManager();
 }
 function renderManager(){
-  // Desktop sidebar buildings
-  const sb=document.getElementById('sidebar-buildings');
-  if(sb)sb.innerHTML=state.buildings.map(b=>`
-    <button class="nav-item${b.id===state.activeBuilding?' active':''}" onclick="selectBuilding('${b.id}')">
-      🏢 ${escH(b.short||b.name.split(' ')[0])}
-    </button>`).join('');
+  const scoped=isBuildingScopedMgr();
 
-  // Mobile building dropdown
+  // Desktop sidebar buildings — building managers see only their own building, no switching
+  const sb=document.getElementById('sidebar-buildings');
+  if(sb){
+    if(scoped){
+      const bld=currentBld();
+      sb.innerHTML=bld?`<div class="nav-item active" style="cursor:default">🏢 ${escH(bld.short||bld.name)}</div>`:'';
+    }else{
+      sb.innerHTML=state.buildings.map(b=>`
+        <button class="nav-item${b.id===state.activeBuilding?' active':''}" onclick="selectBuilding('${b.id}')">
+          🏢 ${escH(b.short||b.name.split(' ')[0])}
+        </button>`).join('');
+    }
+  }
+
+  // Mobile building dropdown — disabled for building managers
   const mbd=document.getElementById('mgr-mobile-bld-select');
   if(mbd){
-    mbd.innerHTML=state.buildings.map(b=>`<option value="${b.id}"${b.id===state.activeBuilding?' selected':''}>${escH(b.name)}</option>`).join('');
+    if(scoped){
+      const bld=currentBld();
+      mbd.innerHTML=bld?`<option value="${bld.id}" selected>${escH(bld.name)}</option>`:'';
+      mbd.disabled=true;
+    }else{
+      mbd.disabled=false;
+      mbd.innerHTML=state.buildings.map(b=>`<option value="${b.id}"${b.id===state.activeBuilding?' selected':''}>${escH(b.name)}</option>`).join('');
+    }
   }
+
+  // Restricted nav items: Rooms, History, Manage are admin-only
+  const restrictedIds=['nav-rooms','nav-history','nav-manage','mnav-rooms','mnav-history','mnav-manage'];
+  restrictedIds.forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.style.display=scoped?'none':'';
+  });
 
   // Mobile season button
   const msb=document.getElementById('mgr-mobile-season');
@@ -2421,6 +2463,8 @@ function renderManager(){
 
   updateShiftDisplay();
   updateFlagBadge();
+  // If a scoped manager somehow landed on a restricted view, bounce to overview
+  if(scoped&&['rooms','history','manage'].includes(mgView))mgView='overview';
   renderManagerMain();
 }
 function toggleSeasonMobile(){
@@ -2437,8 +2481,9 @@ function updateFlagBadge(){
 }
 function renderManagerMain(){
   const el=document.getElementById('manager-main');if(!el)return;
+  if(isBuildingScopedMgr()&&['rooms','history','manage'].includes(mgView))mgView='overview';
   const bld=currentBld(),rooms=currentRooms();
-  const tabs=`<div class="bld-tabs fi">${state.buildings.map(b=>`<button class="bld-tab${b.id===state.activeBuilding?' active':''}" onclick="selectBuilding('${b.id}')">${escH(b.short||b.name)}</button>`).join('')}</div>`;
+  const tabs=isBuildingScopedMgr()?'':`<div class="bld-tabs fi">${state.buildings.map(b=>`<button class="bld-tab${b.id===state.activeBuilding?' active':''}" onclick="selectBuilding('${b.id}')">${escH(b.short||b.name)}</button>`).join('')}</div>`;
   if(mgView==='overview')      el.innerHTML=tabs+renderOverview(bld,rooms);
   else if(mgView==='roster')   el.innerHTML=tabs+renderRoster(bld,rooms);
   else if(mgView==='scheduler') el.innerHTML=tabs+renderScheduler(bld,rooms);
@@ -3041,18 +3086,26 @@ function renderManage(bld,rooms){
   <div id="manage-msg" style="font-size:11px;margin-top:4px"></div>
   <div class="card fi">
     <div class="card-title">MANAGER ACCOUNTS <span style="color:var(--muted);font-weight:400;font-size:10px">${(state.managers||[]).length} total</span>
+      <button class="btn btn-primary btn-sm" onclick="addNewManager()">＋ Add Manager</button>
     </div>
     <div style="border:1px solid var(--border);border-radius:var(--rs);padding:0 10px">
       ${(state.managers||[]).map((m,idx)=>`
-      <div class="cleaner-manage-row">
+      <div class="cleaner-manage-row" style="flex-wrap:wrap">
         <div style="font-size:11px;color:var(--muted);width:22px;flex-shrink:0">#${idx+1}</div>
         <input class="cleaner-edit-name" id="mgr-name-${m.id}" value="${escH(m.name)}" placeholder="Name"/>
+        <select id="mgr-role-${m.id}" onchange="toggleMgrBldField('${m.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:7px 8px;font-size:11px;color:var(--text)">
+          <option value="admin"${m.role==='admin'?' selected':''}>Head of Ops (all buildings)</option>
+          <option value="building"${m.role==='building'?' selected':''}>Housekeeping Manager (one building)</option>
+        </select>
+        <select id="mgr-bld-${m.id}" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:7px 8px;font-size:11px;color:var(--text);${m.role==='building'?'':'display:none'}">
+          ${state.buildings.map(b=>`<option value="${b.id}"${m.buildingId===b.id?' selected':''}>${escH(b.short||b.name)}</option>`).join('')}
+        </select>
         <input class="cleaner-edit-pin" id="mgr-pin-${m.id}" value="${m.pin}" placeholder="PIN" maxlength="4" type="password"/>
         <button class="btn btn-primary btn-sm" onclick="saveManagerAccount('${m.id}')">Save</button>
         ${idx===0?'<div style="width:28px"></div>':`<button class="btn btn-red btn-sm" onclick="removeManagerAccount('${m.id}')">✕</button>`}
       </div>`).join('')}
     </div>
-    <div style="margin-top:8px;font-size:10px;color:var(--muted)">Edit name or PIN inline then Save. Leave PIN blank to force a first-login setup next time.</div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted)">Edit name, role, building, or PIN inline then Save. Leave PIN blank to force a first-login setup next time. Housekeeping Managers only see Overview, Scheduler, Cleaners, Roster and Inspection for their one building.</div>
   </div>`;
 }
 
@@ -3152,13 +3205,21 @@ function showManageMsg(msg,type){
 }
 
 // ── Manager Account CRUD ──
+function toggleMgrBldField(id){
+  const role=document.getElementById('mgr-role-'+id)?.value;
+  const bldSel=document.getElementById('mgr-bld-'+id);
+  if(bldSel)bldSel.style.display=role==='building'?'':'none';
+}
 function saveManagerAccount(id){
   const name=document.getElementById('mgr-name-'+id)?.value.trim();
   const pin=document.getElementById('mgr-pin-'+id)?.value.trim();
+  const role=document.getElementById('mgr-role-'+id)?.value||'admin';
+  const bldId=document.getElementById('mgr-bld-'+id)?.value||'';
   if(!name){showManageMsg('Enter a name.','err');return;}
   if(pin&&!/^\d{4}$/.test(pin)){showManageMsg('PIN must be 4 digits (or leave blank for first-login setup).','err');return;}
+  if(role==='building'&&!bldId){showManageMsg('Choose a building for this manager.','err');return;}
   const mgr=(state.managers||[]).find(m=>m.id===id);if(!mgr)return;
-  mgr.name=name;mgr.pin=pin;saveState();
+  mgr.name=name;mgr.pin=pin;mgr.role=role;mgr.buildingId=role==='building'?bldId:'';saveState();
   showManageMsg(`✓ ${name} saved.`,'ok');renderManagerMain();
 }
 function removeManagerAccount(id){
@@ -3166,6 +3227,12 @@ function removeManagerAccount(id){
   if(!confirm(`Remove manager "${mgr.name}"?`))return;
   state.managers=state.managers.filter(m=>m.id!==id);
   saveState();renderManagerMain();
+}
+function addNewManager(){
+  const id='m'+Date.now();
+  state.managers.push({id,name:'New Manager',pin:'',role:'building',buildingId:state.activeBuilding});
+  saveState();renderManagerMain();
+  setTimeout(()=>{const el=document.getElementById('mgr-name-'+id);if(el){el.select();el.scrollIntoView({behavior:'smooth',block:'center'});}},80);
 }
 
 // ── Room actions ──
