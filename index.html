@@ -1667,6 +1667,13 @@ function setRosterEntry(bldId,dateStr,roomId,patch){
   state.roster[bldId][dateStr][roomId]={...cur,...patch};
   saveState();
 }
+// Shared across Scheduler + Inspection: a unit "needs cleaning today" if ANY roster
+// box is ticked (check-in, check-out, departed, in-house), or it was sent back by
+// the manager after a bad inspection rating.
+function needsCleanToday(bldId,dateStr,room){
+  const re=getRosterEntry(bldId,dateStr,room.id);
+  return !!(re.checkout||re.checkin||re.departed||re.inhouse||room.needsRecleaning);
+}
 
 // ── Schedule helpers ──
 function getSchedule(bldId,dateStr,cleanerId){
@@ -1819,9 +1826,16 @@ function renderInspection(bld,rooms){
   const fair=inspected.filter(r=>getInspection(bld.id,dateStr,r.id).rating==='fair');
   const sentBack=sorted.filter(r=>r.needsRecleaning);
   const awaitingReinsp=sorted.filter(r=>r.awaitingReinspection);
+  const stillNeedsClean=sorted.filter(r=>needsCleanToday(bld.id,dateStr,r)&&!getInspection(bld.id,dateStr,r.id).rating);
 
   // Unit list
-  const unitList=sorted.map(r=>{
+  // Unit list — units that still need cleaning, were sent back, or are awaiting
+  // re-inspection float to the top so managers spot them immediately.
+  const displayOrder=[...sorted].sort((a,b)=>{
+    const score=r=>(r.needsRecleaning?3:0)+(r.awaitingReinspection?2:0)+(needsCleanToday(bld.id,dateStr,r)&&!getInspection(bld.id,dateStr,r.id).rating?1:0);
+    return score(b)-score(a);
+  });
+  const unitList=displayOrder.map(r=>{
     const rt=RT[r.type];
     const insp=getInspection(bld.id,dateStr,r.id);
     const rat=RATINGS.find(x=>x.val===insp.rating);
@@ -1837,6 +1851,7 @@ function renderInspection(bld,rooms){
         <div style="font-size:10px;color:var(--muted)">${fmtFloor(r.floor)} · ${checkedCount}/${totalItems} items checked</div>
       </div>
       ${rat?('<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:'+rat.bg+';color:'+rat.color+';border:1px solid '+rat.color+'">'+rat.label+'</span>'):'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:600;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">Not done</span>'}
+      ${!insp.rating&&needsCleanToday(bld.id,dateStr,r)?'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:var(--amber-light);color:var(--amber);border:1px solid var(--amber);margin-left:4px">🧹 Needs cleaning</span>':''}
       ${r.needsRecleaning?'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:#FDEAEA;color:var(--red);border:1px solid var(--red);margin-left:4px">🔁 Sent back</span>':''}
       ${r.awaitingReinspection?'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:#E8F3FC;color:var(--blue,#0072CF);border:1px solid #0072CF;margin-left:4px">🔁 Re-inspect</span>':''}
     </div>`;
@@ -1951,6 +1966,9 @@ function renderInspection(bld,rooms){
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:10px 16px;font-size:11px;box-shadow:var(--shadow-sm)">
       <span style="color:var(--muted)">Inspected: </span><b style="color:var(--cyan)">${inspected.length}/${sorted.length}</b>
     </div>
+    ${stillNeedsClean.length?`<div style="background:var(--amber-light);border:1px solid #F5D89A;border-radius:var(--r);padding:10px 16px;font-size:11px">
+      <span style="color:var(--muted)">🧹 Needs cleaning: </span><b style="color:var(--amber)">${stillNeedsClean.length} unit${stillNeedsClean.length!==1?'s':''}</b>
+    </div>`:''}
     ${poor.length?`<div style="background:var(--red-light);border:1px solid #F5C0C0;border-radius:var(--r);padding:10px 16px;font-size:11px">
       <span style="color:var(--muted)">Poor: </span><b style="color:var(--red)">${poor.length} unit${poor.length!==1?'s':''}</b>
     </div>`:''}
@@ -3060,13 +3078,8 @@ function renderScheduler(bld,rooms){
   const allScheduled=getAllScheduled(bld.id,dateStr);
   const unscheduled=rooms.filter(r=>!allScheduled.includes(r.id));
 
-  // "Needs cleaning today" = ANY roster box is ticked (check-in, check-out, departed,
-  // in-house), or the room was sent back by the manager after a bad inspection rating.
-  // Everything else is a unit that's just staying occupied — usually no clean needed.
-  const needsCleanFn=r=>{
-    const re=getRosterEntry(bld.id,dateStr,r.id);
-    return re.checkout||re.checkin||re.departed||re.inhouse||r.needsRecleaning;
-  };
+  // "Needs cleaning today" = shared logic in needsCleanToday() — see roster helpers.
+  const needsCleanFn=r=>needsCleanToday(bld.id,dateStr,r);
   const sortFn=(a,b)=>{const an=parseInt(a.number)||0,bn=parseInt(b.number)||0;return an!==bn?an-bn:a.number.localeCompare(b.number);};
 
   const needCleanUnits=unscheduled.filter(needsCleanFn).sort(sortFn);
