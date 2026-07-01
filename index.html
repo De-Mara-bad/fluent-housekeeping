@@ -1287,7 +1287,7 @@ const REAL_BUILDINGS=[
 ];
 
 function makeRoom(bldId,number,type,floor){
-  return {id:`${bldId}-r${Date.now()}-${Math.random().toString(36).slice(2,6)}`,number:String(number),type,floor:floor!=null?floor:1,status:'PENDING',assignedTo:null,startedAt:null,completedAt:null,duration:null};
+  return {id:`${bldId}-r${Date.now()}-${Math.random().toString(36).slice(2,6)}`,number:String(number),type,floor:floor!=null?floor:1,status:'PENDING',assignedTo:null,startedAt:null,completedAt:null,duration:null,needsRecleaning:false,recleanRatingLabel:null,recleanNotes:'',recleanFlaggedAt:null,awaitingReinspection:false};
 }
 function generateGroundFloor(bldId){
   // 4 default Compact Studio units on ground floor — editable in Manage
@@ -1817,6 +1817,8 @@ function renderInspection(bld,rooms){
   const inspected=sorted.filter(r=>getInspection(bld.id,dateStr,r.id).rating);
   const poor=inspected.filter(r=>getInspection(bld.id,dateStr,r.id).rating==='poor');
   const fair=inspected.filter(r=>getInspection(bld.id,dateStr,r.id).rating==='fair');
+  const sentBack=sorted.filter(r=>r.needsRecleaning);
+  const awaitingReinsp=sorted.filter(r=>r.awaitingReinspection);
 
   // Unit list
   const unitList=sorted.map(r=>{
@@ -1835,6 +1837,8 @@ function renderInspection(bld,rooms){
         <div style="font-size:10px;color:var(--muted)">${fmtFloor(r.floor)} · ${checkedCount}/${totalItems} items checked</div>
       </div>
       ${rat?('<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:'+rat.bg+';color:'+rat.color+';border:1px solid '+rat.color+'">'+rat.label+'</span>'):'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:600;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">Not done</span>'}
+      ${r.needsRecleaning?'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:#FDEAEA;color:var(--red);border:1px solid var(--red);margin-left:4px">🔁 Sent back</span>':''}
+      ${r.awaitingReinspection?'<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:#E8F3FC;color:var(--blue,#0072CF);border:1px solid #0072CF;margin-left:4px">🔁 Re-inspect</span>':''}
     </div>`;
   }).join('');
 
@@ -1953,6 +1957,12 @@ function renderInspection(bld,rooms){
     ${fair.length?`<div style="background:var(--amber-light);border:1px solid #F5D89A;border-radius:var(--r);padding:10px 16px;font-size:11px">
       <span style="color:var(--muted)">Fair: </span><b style="color:var(--amber)">${fair.length} unit${fair.length!==1?'s':''}</b>
     </div>`:''}
+    ${sentBack.length?`<div style="background:#FDEAEA;border:1px solid #F5C0C0;border-radius:var(--r);padding:10px 16px;font-size:11px">
+      <span style="color:var(--muted)">Sent back to cleaner: </span><b style="color:var(--red)">${sentBack.length} unit${sentBack.length!==1?'s':''}</b>
+    </div>`:''}
+    ${awaitingReinsp.length?`<div style="background:#E8F3FC;border:1px solid #B7DAF5;border-radius:var(--r);padding:10px 16px;font-size:11px">
+      <span style="color:var(--muted)">Awaiting re-inspection: </span><b style="color:#0072CF">${awaitingReinsp.length} unit${awaitingReinsp.length!==1?'s':''}</b>
+    </div>`:''}
   </div>
 
   <!-- Split layout: list + detail -->
@@ -1996,7 +2006,36 @@ function selectInspRoom(roomId){
 function setInspRating(bldId,dateStr,roomId,rating){
   if(isViewOnlyMgr())return;
   saveInspection(bldId,dateStr,roomId,{rating});
+  const bld=state.buildings.find(x=>x.id===bldId);
+  const room=bld&&bld.rooms.find(r=>r.id===roomId);
+  if(room&&room.awaitingReinspection)updateRoom(bldId,roomId,{awaitingReinspection:false});
+  if(rating&&rating!=='excellent'){
+    flagForRecleaning(bldId,dateStr,roomId,rating);
+  }else if(rating==='excellent'){
+    clearRecleaningFlag(bldId,roomId);
+  }
   renderManagerMain();
+}
+// Anything less than "Excellent" gets sent straight back to the cleaner who did the room:
+// it re-opens as a PENDING task (so it flows through the normal Start/Done cycle again),
+// carries the rating + inspector notes so the cleaner knows exactly what to fix, and once
+// they mark it done it flips to "awaiting re-inspection" for the manager — see caDone().
+function flagForRecleaning(bldId,dateStr,roomId,rating){
+  const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
+  const room=bld.rooms.find(r=>r.id===roomId);if(!room)return;
+  const insp=getInspection(bldId,dateStr,roomId);
+  const rat=RATINGS.find(x=>x.val===rating);
+  updateRoom(bldId,roomId,{
+    needsRecleaning:true,
+    recleanRatingLabel:rat?rat.label:rating,
+    recleanNotes:insp.notes||'',
+    recleanFlaggedAt:Date.now(),
+    awaitingReinspection:false,
+    status:'PENDING',startedAt:null,completedAt:null,duration:null
+  });
+}
+function clearRecleaningFlag(bldId,roomId){
+  updateRoom(bldId,roomId,{needsRecleaning:false,recleanRatingLabel:null,recleanNotes:'',recleanFlaggedAt:null});
 }
 function toggleInspItem(bldId,dateStr,roomId,key,checked){
   if(isViewOnlyMgr())return;
@@ -3744,6 +3783,17 @@ function renderCaContent(){
   const inprog=myRooms.filter(r=>r.status==='IN_PROGRESS');
   const pending=myRooms.filter(r=>r.status==='PENDING'||r.status==='IN_PROGRESS');
   const pct=total?Math.round((done.length/total)*100):0;
+  const needsReclean=myRooms.filter(r=>r.needsRecleaning);
+
+  // Re-clean banner — shown across all tabs whenever the manager has sent a unit back
+  const recleanBanner=needsReclean.length?`
+    <div style="background:#FDEAEA;border-bottom:2px solid var(--red);padding:12px 16px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:22px">🔁</span>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:12px;color:var(--red)">${needsReclean.length} unit${needsReclean.length!==1?'s':''} sent back for re-cleaning</div>
+        <div style="font-size:10px;color:var(--muted)">Check the CLEAN tab — the manager's rating and notes are on the unit.</div>
+      </div>
+    </div>`:'';
 
   // Progress bar
   const progressBar=`
@@ -3766,7 +3816,7 @@ function renderCaContent(){
   // ── SCHEDULE TAB — read-only day overview ──
   if(caView==='schedule'){
     if(!total){
-      el.innerHTML=progressBar+`<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+      el.innerHTML=recleanBanner+progressBar+`<div style="text-align:center;padding:60px 20px;color:var(--muted)">
         <div style="font-size:36px;margin-bottom:12px">📋</div>
         <div style="font-size:15px;font-weight:700;color:var(--text)">No schedule yet</div>
         <div style="font-size:11px;margin-top:6px;color:var(--muted)">Your manager hasn't assigned you any units today.</div>
@@ -3835,14 +3885,14 @@ function renderCaContent(){
       </div>
     </div>`;
 
-    el.innerHTML=progressBar+statsHtml+schedHtml;
+    el.innerHTML=recleanBanner+progressBar+statsHtml+schedHtml;
     return;
   }
 
   // ── CLEAN TAB — actionable pending rooms ──
   if(caView==='rooms'){
     if(!pending.length){
-      el.innerHTML=progressBar+statsHtml+`<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+      el.innerHTML=recleanBanner+progressBar+statsHtml+`<div style="text-align:center;padding:60px 20px;color:var(--muted)">
         <div style="font-size:42px;margin-bottom:12px">🎉</div>
         <div style="font-size:16px;font-weight:700;color:var(--green)">All units done!</div>
         <div style="font-size:12px;margin-top:6px">Great work today.</div>
@@ -3852,6 +3902,7 @@ function renderCaContent(){
 
     const byBld={};
     pending.forEach(r=>{if(!byBld[r.bldId])byBld[r.bldId]={name:r.bldName,rooms:[]};byBld[r.bldId].rooms.push(r);});
+    Object.values(byBld).forEach(grp=>grp.rooms.sort((a,b)=>(b.needsRecleaning?1:0)-(a.needsRecleaning?1:0)));
     let listHtml='';
     Object.values(byBld).forEach(grp=>{
       listHtml+=`<div class="ca-section-label">🏢 ${escH(grp.name)}</div><div class="ca-room-list">`;
@@ -3871,11 +3922,17 @@ function renderCaContent(){
           <div class="mini-bar"><div class="mini-bar-fill" style="background:${over?'var(--red)':'var(--green)'};width:${barPct}%"></div></div>
           <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:8px">Expected: ${targetMins}min${re.departed?' (departure clean)':''}</div>`:'';
 
+        const recleanNotice=room.needsRecleaning?`
+          <div style="background:#FDEAEA;border:1.5px solid var(--red);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+            <div style="font-weight:700;font-size:11px;color:var(--red);display:flex;align-items:center;gap:6px">🔁 RE-CLEAN REQUIRED — rated "${escH(room.recleanRatingLabel||'')}"</div>
+            ${room.recleanNotes?`<div style="font-size:11px;color:var(--text);margin-top:4px">${escH(room.recleanNotes)}</div>`:`<div style="font-size:11px;color:var(--muted);margin-top:4px">No written notes — check with your manager if unsure what to fix.</div>`}
+          </div>`:'';
+
         // ── ACTION AREA ──
         let actionHtml='';
         if(room.status==='PENDING'){
           // Not started yet — show START button only
-          actionHtml=`<button class="btn btn-amber" style="width:100%;padding:14px;font-size:13px" onclick="caStart('${room.bldId}','${room.id}')">▶ START CLEANING</button>`;
+          actionHtml=`<button class="btn btn-amber" style="width:100%;padding:14px;font-size:13px" onclick="caStart('${room.bldId}','${room.id}')">${room.needsRecleaning?'▶ START RE-CLEAN':'▶ START CLEANING'}</button>`;
         } else {
           // In progress — show large checkbox + flag button
           actionHtml=`
@@ -3889,7 +3946,7 @@ function renderCaContent(){
                   display:flex;align-items:center;justify-content:center;flex-shrink:0;background:#fff">
                   <span style="font-size:16px;color:var(--green);line-height:1"></span>
                 </span>
-                <span style="font-weight:700;font-size:14px;color:var(--green)">Mark as Done</span>
+                <span style="font-weight:700;font-size:14px;color:var(--green)">${room.needsRecleaning?'Mark Re-Clean Done':'Mark as Done'}</span>
               </label>
               <!-- Flag button -->
               <button onclick="caFlag('${room.bldId}','${room.id}')"
@@ -3903,9 +3960,9 @@ function renderCaContent(){
             </div>`;
         }
 
-        const cardBg=re.departed?'background:#D6F4F6;':re.inhouse?'background:#EEE8FF;':'';
-        listHtml+=`<div class="ca-room ${isActive?'ca-active':''}" id="caroom-${room.id}" style="${cardBg}">
-          <div class="room-accent" style="background:${rt.color}"></div>
+        const cardBg=room.needsRecleaning?'background:#FFF6F6;':re.departed?'background:#D6F4F6;':re.inhouse?'background:#EEE8FF;':'';
+        listHtml+=`<div class="ca-room ${isActive?'ca-active':''}" id="caroom-${room.id}" style="${cardBg}${room.needsRecleaning?';border:2px solid var(--red)':''}">
+          <div class="room-accent" style="background:${room.needsRecleaning?'var(--red)':rt.color}"></div>
           <div class="ca-room-top">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <span class="ca-room-num">Unit ${escH(room.number)}</span>
@@ -3915,20 +3972,20 @@ function renderCaContent(){
             <span class="status-chip chip-${room.status.toLowerCase()}">${room.status.replace('_',' ')}</span>
           </div>
           <div style="font-size:10px;color:var(--muted);margin:4px 0 6px">${fmtFloor(room.floor)} · ${targetMins}min expected${re.departed?' (departure clean)':''}</div>
-          ${depTag}${guestTag}${timerHtml}
+          ${recleanNotice}${depTag}${guestTag}${timerHtml}
           <div class="ca-room-actions">${actionHtml}</div>
         </div>`;
       });
       listHtml+='</div>';
     });
-    el.innerHTML=progressBar+statsHtml+listHtml;
+    el.innerHTML=recleanBanner+progressBar+statsHtml+listHtml;
     return;
   }
 
   // ── DONE TAB ──
   if(caView==='done'){
     if(!done.length){
-      el.innerHTML=progressBar+statsHtml+`<div style="text-align:center;padding:60px 20px;color:var(--muted)">No completed units yet.</div>`;
+      el.innerHTML=recleanBanner+progressBar+statsHtml+`<div style="text-align:center;padding:60px 20px;color:var(--muted)">No completed units yet.</div>`;
       return;
     }
     const doneList=done.map(room=>{
@@ -3953,7 +4010,7 @@ function renderCaContent(){
         </div>
       </div>`;
     }).join('');
-    el.innerHTML=progressBar+statsHtml+`<div class="ca-room-list">${doneList}</div>`;
+    el.innerHTML=recleanBanner+progressBar+statsHtml+`<div class="ca-room-list">${doneList}</div>`;
   }
 }
 
@@ -3971,8 +4028,13 @@ function caDone(bldId,roomId){
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
   const room=bld.rooms.find(r=>r.id===roomId);if(!room)return;
   const dur=room.startedAt?Math.floor((Date.now()-room.startedAt)/60000):RT[room.type].mins;
-  updateRoom(bldId,roomId,{status:'DONE',completedAt:Date.now(),duration:dur});
-  pushDoneNotification(bldId,bld.name,roomId,room.number,currentCleaner?currentCleaner.name:'Cleaner');
+  const wasReclean=!!room.needsRecleaning;
+  updateRoom(bldId,roomId,{
+    status:'DONE',completedAt:Date.now(),duration:dur,
+    needsRecleaning:false,recleanRatingLabel:null,recleanNotes:'',recleanFlaggedAt:null,
+    awaitingReinspection:wasReclean?true:(room.awaitingReinspection||false)
+  });
+  pushDoneNotification(bldId,bld.name,roomId,room.number,(currentCleaner?currentCleaner.name:'Cleaner')+(wasReclean?' — re-cleaned, ready for re-inspection':''));
   renderCaContent();
 }
 // Compress an image file to a JPEG data URL (caps size for Firestore + export)
