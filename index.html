@@ -1556,9 +1556,9 @@ function getAllScheduled(bldId,dateStr){
 //  HISTORICAL DATA SNAPSHOT
 // ═══════════════════════════════════════════
 // Call this when resetting a building's day — saves a permanent record
-function snapshotDay(bldId){
+function snapshotDay(bldId,dateStrOverride){
   const bld=state.buildings.find(b=>b.id===bldId);if(!bld)return;
-  const dateStr=todayStr();
+  const dateStr=dateStrOverride||todayStr();
   const rooms=bld.rooms;
   const hasActivity=rooms.some(r=>r.status!=='PENDING'||r.duration);
   if(!hasActivity)return; // nothing to save
@@ -1608,18 +1608,37 @@ function snapshotDay(bldId){
   saveState();
 }
 
-// Auto-snapshot every day at midnight (or on first load of a new day)
-let _lastSnapshotDate='';
-function checkDailySnapshot(){
+// Automatically closes out a building's day — saves it to History (under the
+// correct date) AND resets rooms to PENDING, the same as the manual "Reset Day"
+// button, so a supervisor doesn't have to do it by hand every night.
+// Triggers in two situations:
+//   1) It's 23:00 or later and today still has un-reset activity — close out today.
+//   2) The app is opened on a later day and finds activity left over from a
+//      previous day that never got closed out (e.g. app wasn't open at 11pm) —
+//      close out that earlier day, snapshotted under ITS correct date.
+function autoRolloverCheck(){
   const today=todayStr();
-  if(_lastSnapshotDate===today)return;
-  _lastSnapshotDate=today;
-  // If any building had data from yesterday, it's already been snapshotted on reset
-  // This is a safety net — snapshot anything with completedAt from previous days
+  const hour=new Date().getHours();
+  let changed=false;
   state.buildings.forEach(bld=>{
-    const hasOldData=bld.rooms.some(r=>r.completedAt&&new Date(r.completedAt).toISOString().slice(0,10)<today);
-    if(hasOldData)snapshotDay(bld.id);
+    const hasActivity=bld.rooms.some(r=>r.status!=='PENDING'||r.duration);
+    if(!hasActivity)return;
+    // Figure out which date this activity actually belongs to
+    const timestamps=bld.rooms.map(r=>r.completedAt||r.startedAt).filter(Boolean).sort((a,b)=>a-b);
+    const activityDate=timestamps.length?new Date(timestamps[0]).toISOString().slice(0,10):today;
+    const isStaleFromPastDay=activityDate<today;
+    const isLateTonight=hour>=23&&activityDate===today;
+    if(isStaleFromPastDay||isLateTonight){
+      snapshotDay(bld.id,activityDate);
+      bld.rooms.forEach(r=>{r.status='PENDING';r.startedAt=null;r.completedAt=null;r.duration=null;r.assignedTo=null;});
+      changed=true;
+    }
   });
+  if(changed){
+    saveState();
+    if(document.getElementById('manager-screen')?.classList.contains('active')){renderManagerMain();updateShiftDisplay();}
+    if(document.getElementById('cleaner-screen')?.classList.contains('active')){renderCaContent();}
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -3836,7 +3855,7 @@ async function boot(){
   }
 
   const ok=await loadState();
-  checkDailySnapshot();
+  autoRolloverCheck();
 
   // Set logo images using embedded base64
   ['login-logo-img','loading-logo'].forEach(id=>{
@@ -3865,6 +3884,10 @@ async function boot(){
   setInterval(()=>{
     if(document.getElementById('manager-screen').classList.contains('active'))renderManagerMain();
   },30000);
+
+  // Check every 60s whether it's time to auto close-out the day (11pm) or
+  // catch up on a day that was never closed out (e.g. app was closed at 11pm)
+  setInterval(autoRolloverCheck,60000);
 }
 
 boot();
