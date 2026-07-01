@@ -1408,7 +1408,18 @@ function saveState(){
     }catch(e){
       console.warn('Firestore save failed, data safe in localStorage backup:',e.message);
     }
+    _saveTimer=null; // mark save complete so the real-time listener logic works correctly
   },800);
+}
+
+// Use this instead of saveState() for structural changes (adding/editing/removing
+// units, buildings, cleaners, managers) that must NOT be lost to a quick refresh.
+// Writes to Firestore right away instead of waiting on the 800ms debounce.
+async function saveStateImmediate(){
+  try{localStorage.setItem('fluent_hs_backup',JSON.stringify(state));}catch{}
+  clearTimeout(_saveTimer);
+  _saveTimer=null;
+  await saveStateNow();
 }
 
 // Load from Firestore once, then subscribe to real-time changes
@@ -3266,7 +3277,7 @@ function saveUnit(){
     if(bld.rooms.find(r=>r.number===number)){errEl.textContent='Unit number already exists.';return;}
     bld.rooms.push(makeRoom(bld.id,number,type,floor));
   }
-  saveState();closeModal('modal-unit');renderManagerMain();
+  saveStateImmediate();closeModal('modal-unit');renderManagerMain();
 }
 function removeUnit(bldId,roomId){
   if(isViewOnlyMgr())return;
@@ -3274,7 +3285,7 @@ function removeUnit(bldId,roomId){
   const room=bld.rooms.find(r=>r.id===roomId);if(!room)return;
   if(!confirm(`Remove unit ${room.number} from ${bld.name}?`))return;
   bld.rooms=bld.rooms.filter(r=>r.id!==roomId);
-  saveState();renderManagerMain();
+  saveStateImmediate();renderManagerMain();
 }
 function autoNumberUnits(bldId){
   if(isViewOnlyMgr())return;
@@ -3288,7 +3299,7 @@ function autoNumberUnits(bldId){
     const idx=bld.rooms.findIndex(r=>r.id===room.id);
     bld.rooms[idx].number=`${room.floor}${String(pos).padStart(2,'0')}`;
   });
-  saveState();renderManagerMain();
+  saveStateImmediate();renderManagerMain();
 }
 
 // ── Cleaner CRUD ──
@@ -3748,17 +3759,25 @@ function compressImageFile(file,maxDim,quality,callback){
 let _flagCtx={bldId:null,roomId:null,photoDataUrl:null};
 
 function caFlag(bldId,roomId){
-  // Security: only allow if this room belongs to current cleaner's schedule
-  const myRooms=getMyRooms();
-  if(!myRooms.find(r=>r.id===roomId)){return;}
-  _flagCtx={bldId,roomId,photoDataUrl:null};
-  document.getElementById('flag-reason').value='';
-  document.getElementById('flag-note').value='';
-  document.getElementById('flag-photo-input').value='';
-  const prev=document.getElementById('flag-photo-preview');
-  prev.style.display='none';prev.src='';
-  document.getElementById('flag-err').textContent='';
-  openModal('modal-flag');
+  try{
+    // Security: only allow if this room belongs to current cleaner's schedule
+    const myRooms=getMyRooms();
+    if(!myRooms.find(r=>r.id===roomId)){
+      alert('This unit is not in your assigned list right now, so it can\'t be flagged from here. Please tell De-Mara: room lookup failed for flag.');
+      return;
+    }
+    _flagCtx={bldId,roomId,photoDataUrl:null};
+    document.getElementById('flag-reason').value='';
+    document.getElementById('flag-note').value='';
+    document.getElementById('flag-photo-input').value='';
+    const prev=document.getElementById('flag-photo-preview');
+    prev.style.display='none';prev.src='';
+    document.getElementById('flag-err').textContent='';
+    openModal('modal-flag');
+  }catch(e){
+    console.error('caFlag error:',e);
+    alert('Something went wrong opening the flag box: '+e.message+'\n\nPlease screenshot this and send it to De-Mara.');
+  }
 }
 
 function handleFlagPhotoSelect(input){
