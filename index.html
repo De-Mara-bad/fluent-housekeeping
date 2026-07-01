@@ -3060,11 +3060,12 @@ function renderScheduler(bld,rooms){
   const allScheduled=getAllScheduled(bld.id,dateStr);
   const unscheduled=rooms.filter(r=>!allScheduled.includes(r.id));
 
-  // "Needs cleaning today" = a checkout happened, or an in-house clean was requested.
+  // "Needs cleaning today" = a checkout happened, an in-house clean was requested,
+  // or the room was sent back by the manager after a bad inspection rating.
   // Everything else is a unit that's just staying occupied — usually no clean needed.
   const needsCleanFn=r=>{
     const re=getRosterEntry(bld.id,dateStr,r.id);
-    return re.checkout||re.inhouse;
+    return re.checkout||re.inhouse||r.needsRecleaning;
   };
   const sortFn=(a,b)=>{const an=parseInt(a.number)||0,bn=parseInt(b.number)||0;return an!==bn?an-bn:a.number.localeCompare(b.number);};
 
@@ -3076,11 +3077,13 @@ function renderScheduler(bld,rooms){
     const re=getRosterEntry(bld.id,dateStr,r.id);
     const needsClean=needsCleanFn(r);
     const badge=(re.checkout?`<span style="font-size:8px;color:var(--amber);margin-left:2px;font-weight:800">CO</span>`:re.checkin?`<span style="font-size:8px;color:var(--green);margin-left:2px;font-weight:800">CI</span>`:``)+(re.departed?`<span style="font-size:8px;color:var(--teal);margin-left:2px">✓</span>`:``)+(re.inhouse?`<span style="font-size:8px;color:var(--violet);margin-left:2px">🏠</span>`:``);
-    const style=needsClean
+    const style=r.needsRecleaning
+      ?'border:2px solid var(--red);background:#FDEAEA'
+      :needsClean
       ?'border:2px solid var(--amber);background:var(--amber-light)'
       :'opacity:.6';
     return `<div class="sched-unit-pill" data-room="${r.id}" data-from="pool" onclick="schedTapPill(this,'${r.id}','pool')" style="${style}">
-      ${needsClean?'<span style="font-size:13px" title="Needs cleaning today">🧹</span>':''}
+      ${r.needsRecleaning?'<span style="font-size:13px" title="Sent back for re-cleaning">🔁</span>':needsClean?'<span style="font-size:13px" title="Needs cleaning today">🧹</span>':''}
       <span style="color:${rt.color};font-size:14px">${rt.icon}</span>
       <span class="sched-pill-num">${escH(r.number)}</span>
       <span class="sched-pill-type" style="color:${rt.color}">${rt.short}${badge}</span>
