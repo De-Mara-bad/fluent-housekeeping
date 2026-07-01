@@ -3060,12 +3060,12 @@ function renderScheduler(bld,rooms){
   const allScheduled=getAllScheduled(bld.id,dateStr);
   const unscheduled=rooms.filter(r=>!allScheduled.includes(r.id));
 
-  // "Needs cleaning today" = a checkout happened, an in-house clean was requested,
-  // or the room was sent back by the manager after a bad inspection rating.
+  // "Needs cleaning today" = ANY roster box is ticked (check-in, check-out, departed,
+  // in-house), or the room was sent back by the manager after a bad inspection rating.
   // Everything else is a unit that's just staying occupied — usually no clean needed.
   const needsCleanFn=r=>{
     const re=getRosterEntry(bld.id,dateStr,r.id);
-    return re.checkout||re.inhouse||r.needsRecleaning;
+    return re.checkout||re.checkin||re.departed||re.inhouse||r.needsRecleaning;
   };
   const sortFn=(a,b)=>{const an=parseInt(a.number)||0,bn=parseInt(b.number)||0;return an!==bn?an-bn:a.number.localeCompare(b.number);};
 
