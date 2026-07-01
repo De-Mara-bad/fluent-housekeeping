@@ -2214,6 +2214,35 @@ function generateExcel(days,filename,bldIdFilter='all'){
   styleHeaderRow(wsReport,reportRows[0].length);
   XLSX.utils.book_append_sheet(wb,wsReport,'Cleaning Report');
 
+  // ── Sheet 1b: Lost & Found Register (every unit flagged as Lost & Found) ──
+  const lfRows=[['Date','Building','Unit','Floor','Type','Found By','Description','Status','Photo']];
+  const lfPhotoLinks=[]; // {row, dataUrl}
+  days.forEach(day=>{
+    day.records.filter(r=>r.status==='FLAGGED'&&r.flagReason==='Lost & Found').forEach(r=>{
+      const hasPhoto=!!r.flagPhoto;
+      if(hasPhoto)lfPhotoLinks.push({row:lfRows.length,dataUrl:r.flagPhoto});
+      lfRows.push([
+        day.date,
+        day.buildingName,
+        r.unit, r.floor, r.type,
+        r.flaggedBy||'',
+        r.flagNote||'',
+        'Unclaimed', // supervisor can edit this cell once an item is returned/claimed
+        hasPhoto?'📷 View Photo':'—',
+      ]);
+    });
+  });
+  if(lfRows.length===1)lfRows.push(['No lost & found items recorded','','','','','','','','']);
+  const wsLF=XLSX.utils.aoa_to_sheet(lfRows);
+  lfPhotoLinks.forEach(({row,dataUrl})=>{
+    if(dataUrl.length>60000)return;
+    const addr=XLSX.utils.encode_cell({r:row,c:8});
+    if(wsLF[addr])wsLF[addr].l={Target:dataUrl,Tooltip:'Click to view the lost & found photo'};
+  });
+  wsLF['!cols']=[{wch:12},{wch:22},{wch:8},{wch:6},{wch:18},{wch:16},{wch:34},{wch:14},{wch:16}];
+  styleHeaderRow(wsLF,lfRows[0].length);
+  XLSX.utils.book_append_sheet(wb,wsLF,'Lost & Found Register');
+
   // ── Sheet 2: Roster (check-in / check-out by date) ──
   const rosterRows=[['Date','Building','Unit','Floor','Type','Guest','Checkout','Check-in','Departed','In House Cleaning','Turnover']];
   days.forEach(day=>{
