@@ -646,11 +646,15 @@ tr:hover td{background:var(--surface2)}
   <div id="mgr-mobile-header" style="display:none">
     <img id="mgr-mobile-logo" src="" alt="Fluent" style="height:26px;flex-shrink:0"/>
     <select id="mgr-mobile-bld-select" onchange="selectBuilding(this.value)"></select>
+    <button id="mgr-mobile-notif-btn" onclick="openNotifPanel()" style="position:relative;padding:6px 10px;border-radius:var(--rs);border:1px solid var(--border);background:var(--surface2);font-size:14px;cursor:pointer;flex-shrink:0">
+      🔔<span id="notif-badge-m" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:10px;padding:0 4px;font-size:8px;font-weight:700;line-height:1.4">0</span>
+    </button>
     <button id="mgr-mobile-season" onclick="toggleSeasonMobile()">PEAK</button>
   </div>
 
   <div class="sidebar">
     <div class="sidebar-logo" style="padding:14px 16px"><img id="sidebar-logo-img" src="" alt="Fluent" style="height:32px;display:block;margin-bottom:4px"/><span>HOUSEKEEPING</span></div>
+    <button class="nav-item" onclick="openNotifPanel()" style="margin-top:6px">🔔 Notifications <span id="notif-badge" class="badge" style="display:none">0</span></button>
     <div class="nav-section" style="margin-top:10px">VIEWS</div>
     <button class="nav-item active" onclick="mgNav('overview')" id="nav-overview">📊 Overview</button>
     <button class="nav-item" onclick="mgNav('roster')" id="nav-roster">📋 Roster</button>
@@ -771,6 +775,18 @@ tr:hover td{background:var(--surface2)}
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeFlagModal()">Cancel</button>
       <button class="btn btn-red" onclick="submitFlagModal()">⚑ Submit Flag</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Notifications -->
+<div class="modal-overlay" id="modal-notifs">
+  <div class="modal">
+    <h2>🔔 Notifications</h2>
+    <div id="notif-list" style="max-height:360px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="clearAllNotifs()">Clear All</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-notifs')">Close</button>
     </div>
   </div>
 </div>
@@ -1322,6 +1338,7 @@ function defaultState(){
     history:{},
     // inspections[bldId][dateStr][roomId] = {rating:'', notes:'', items:{}, inspectedBy:'', timestamp:null}
     inspections:{},
+    notifications:[],
   };
 }
 
@@ -1353,6 +1370,7 @@ function migrateState(s){
   if(!s.schedules)s.schedules={};
   if(!s.history)s.history={};
   if(!s.inspections)s.inspections={};
+  if(!s.notifications)s.notifications=[];
   if(s.cleanersOnShift==null)s.cleanersOnShift=s.season==='peak'?6:3;
   // Migrate to multi-manager system
   if(!s.managers){
@@ -1459,6 +1477,9 @@ async function loadState(){
       }
     }
 
+    // Seed known notification IDs so existing/historic ones don't trigger toasts
+    _knownNotifIds=new Set((state.notifications||[]).map(n=>n.id));
+
     // Subscribe to real-time updates (so multiple devices stay in sync)
     // We track our own save timestamps to avoid overwriting our own changes
     _unsubscribe=window._onSnapshot(ref,docSnap=>{
@@ -1470,6 +1491,7 @@ async function loadState(){
       if(isOurOwnSave||_saveTimer)return;
       // Only apply if this truly came from another device
       state=migrateState(JSON.parse(incoming.data));
+      handleIncomingNotifications();
       if(document.getElementById('manager-screen').classList.contains('active')){
         renderManagerMain();
         updateShiftDisplay();
@@ -1524,6 +1546,106 @@ function updateRoom(bldId,roomId,patch){
   bld.rooms[idx]={...bld.rooms[idx],...patch};saveState();
 }
 function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ═══════════════════════════════════════════
+//  DONE NOTIFICATIONS — supervisor alerts when a cleaner marks a unit done
+// ═══════════════════════════════════════════
+let _knownNotifIds=null; // seeded once on load so old notifications don't re-toast
+
+function pushDoneNotification(bldId,bldName,roomId,roomNumber,cleanerName){
+  if(!state.notifications)state.notifications=[];
+  state.notifications.unshift({
+    id:'n'+Date.now()+'-'+Math.random().toString(36).slice(2,6),
+    bldId,bldName,roomId,roomNumber,cleanerName,
+    timestamp:Date.now(),seen:false,
+  });
+  if(state.notifications.length>50)state.notifications.length=50;
+  saveStateImmediate(); // don't risk losing this to the debounce + a quick refresh
+}
+
+function updateNotifBadge(){
+  const count=(state.notifications||[]).filter(n=>!n.seen).length;
+  ['notif-badge','notif-badge-m'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    el.style.display=count?'':'none';
+    el.textContent=count>9?'9+':String(count);
+  });
+}
+
+function showDoneToast(n){
+  let container=document.getElementById('done-toast-container');
+  if(!container){
+    container=document.createElement('div');
+    container.id='done-toast-container';
+    container.style.cssText='position:fixed;top:16px;right:16px;z-index:9998;width:280px;max-width:92vw';
+    document.body.appendChild(container);
+  }
+  const el=document.createElement('div');
+  el.className='fi';
+  el.style.cssText='background:var(--surface);border-left:4px solid var(--green);box-shadow:var(--shadow);border-radius:var(--rs);padding:10px 14px;margin-bottom:8px;font-size:12px;color:var(--text);cursor:pointer';
+  el.innerHTML=`<div style="font-weight:700;color:var(--green)">✓ Unit done</div>
+    <div style="margin-top:2px"><b>${escH(n.cleanerName)}</b> finished Unit ${escH(n.roomNumber)}</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:2px">${escH(n.bldName)}</div>`;
+  el.onclick=()=>{el.remove();openNotifPanel();};
+  container.appendChild(el);
+  setTimeout(()=>{el.remove();},7000);
+}
+
+// Called whenever fresh state arrives from Firestore (another device's write).
+// Diffs against what we've already seen/toasted so nothing repeats.
+function handleIncomingNotifications(){
+  if(_knownNotifIds===null){ // not seeded yet (shouldn't normally happen) — seed silently
+    _knownNotifIds=new Set((state.notifications||[]).map(n=>n.id));
+    updateNotifBadge();
+    return;
+  }
+  const notifs=state.notifications||[];
+  const newOnes=notifs.filter(n=>!_knownNotifIds.has(n.id));
+  newOnes.forEach(n=>{
+    _knownNotifIds.add(n.id);
+    if(document.getElementById('manager-screen')?.classList.contains('active')){
+      showDoneToast(n);
+    }
+  });
+  updateNotifBadge();
+}
+
+function openNotifPanel(){
+  renderNotifPanel();
+  openModal('modal-notifs');
+  (state.notifications||[]).forEach(n=>n.seen=true);
+  saveState();
+  updateNotifBadge();
+}
+
+function renderNotifPanel(){
+  const list=document.getElementById('notif-list');if(!list)return;
+  const notifs=state.notifications||[];
+  if(!notifs.length){
+    list.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No notifications yet.</div>';
+    return;
+  }
+  list.innerHTML=notifs.map(n=>{
+    const mins=Math.max(0,Math.round((Date.now()-n.timestamp)/60000));
+    const timeAgo=mins<1?'just now':mins<60?mins+'min ago':Math.round(mins/60)+'h ago';
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:16px;color:var(--green);flex-shrink:0">✓</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px"><b>${escH(n.cleanerName)}</b> finished Unit ${escH(n.roomNumber)}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${escH(n.bldName)} · ${timeAgo}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function clearAllNotifs(){
+  if(!confirm('Clear all notifications?'))return;
+  state.notifications=[];
+  saveState();
+  renderNotifPanel();updateNotifBadge();
+}
+
 
 // ── Roster helpers ──
 function getRosterEntry(bldId,dateStr,roomId){
@@ -2618,6 +2740,7 @@ function renderManager(){
 
   updateShiftDisplay();
   updateFlagBadge();
+  updateNotifBadge();
   // If a scoped manager somehow landed on a restricted view, bounce to overview
   if(scoped&&['rooms','history','manage'].includes(mgView))mgView='overview';
   renderManagerMain();
@@ -3783,6 +3906,7 @@ function caDone(bldId,roomId){
   const room=bld.rooms.find(r=>r.id===roomId);if(!room)return;
   const dur=room.startedAt?Math.floor((Date.now()-room.startedAt)/60000):RT[room.type].mins;
   updateRoom(bldId,roomId,{status:'DONE',completedAt:Date.now(),duration:dur});
+  pushDoneNotification(bldId,bld.name,roomId,room.number,currentCleaner?currentCleaner.name:'Cleaner');
   renderCaContent();
 }
 // Compress an image file to a JPEG data URL (caps size for Firestore + export)
