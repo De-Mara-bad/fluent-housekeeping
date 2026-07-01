@@ -3925,7 +3925,12 @@ function renderCaContent(){
         const recleanNotice=room.needsRecleaning?`
           <div style="background:#FDEAEA;border:1.5px solid var(--red);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
             <div style="font-weight:700;font-size:11px;color:var(--red);display:flex;align-items:center;gap:6px">🔁 RE-CLEAN REQUIRED — rated "${escH(room.recleanRatingLabel||'')}"</div>
-            ${room.recleanNotes?`<div style="font-size:11px;color:var(--text);margin-top:4px">${escH(room.recleanNotes)}</div>`:`<div style="font-size:11px;color:var(--muted);margin-top:4px">No written notes — check with your manager if unsure what to fix.</div>`}
+            <div style="font-size:10px;font-weight:700;margin-top:5px">
+              <span style="background:${re.departed?'#FEF4E4':'#E0F4F5'};color:${re.departed?'var(--amber)':'var(--teal)'};border:1px solid ${re.departed?'var(--amber)':'var(--teal)'};border-radius:3px;padding:2px 8px">
+                ${re.departed?'↑ DEPARTURE CLEAN':'🏠 IN-HOUSE CLEAN'} · ${targetMins}min
+              </span>
+            </div>
+            ${room.recleanNotes?`<div style="font-size:11px;color:var(--text);margin-top:6px">${escH(room.recleanNotes)}</div>`:`<div style="font-size:11px;color:var(--muted);margin-top:6px">No written notes — check with your manager if unsure what to fix.</div>`}
           </div>`:'';
 
         // ── ACTION AREA ──
